@@ -144,7 +144,6 @@ ENV/
 env.bak/
 venv.bak/
 .vscode/
-test_install_venv/
 
 # Spyder project settings
 .spyderproject
