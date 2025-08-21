@@ -35,6 +35,7 @@ knowledge-grounded agent.
 import asyncio
 import logging
 from pathlib import Path
+import os
 
 try:
     import chromadb
@@ -46,8 +47,8 @@ except ImportError:
 
 
 # --- Step 1: Import from the new fairlib.utils.module and the central fairlib API ---
-# We now use the DocumentLoader from our shared utilities.
-from fairlib.utils.autograder_utils import DocumentLoader
+# We now use the DocumentProcessor from our shared utilities.
+from fairlib.utils.document_processor import DocumentProcessor
 
 # All other components are imported from the central `fairlib` API, promoting
 # consistency and ease of use.
@@ -63,8 +64,11 @@ from fairlib import (
     SimpleAgent,
     SentenceTransformerEmbedder,
     SimpleRetriever,
-    KnowledgeBaseQueryTool  # <-- Using the official framework tool
+    KnowledgeBaseQueryTool 
 )
+
+settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
+settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # Configure logging for the demo
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -127,14 +131,17 @@ async def main():
         logger.error(f"README.md not found in the current directory. Please create one to run this demo.")
         return
         
-    readme_content = DocumentLoader.load_file_content(readme_path)
-    
-    if not readme_content:
-        logger.error("Failed to load content from README.md. Exiting.")
+    doc_proc = DocumentProcessor({"files_directory": str(readme_path.parent)})
+
+    # Process a single file -> DP handles extraction + split_text_semantic internally
+    # Important note: document processor now returns a Document object, instead of chunks and metadata
+    document = doc_proc.process_file(str(readme_path))
+    if not document:
+        logger.error("DocumentProcessor returned no documents from README.md.")
         return
 
     # Split the document into smaller chunks for effective retrieval.
-    chunks = split_text(readme_content)
+    chunks = split_text(document[0].page_content)
     logger.info(f"Document split into {len(chunks)} chunks.")
 
     # Add the document chunks to the long-term memory (vector store).

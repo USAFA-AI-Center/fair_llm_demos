@@ -18,8 +18,6 @@ collaboration, see `demo_advanced_calculator_calculus.py`.
 # --- Step 1: Import the necessary framework components ---
 # We import everything needed to build a single agent from the ground up.
 from fairlib import (
-    settings,
-    OpenAIAdapter,
     HuggingFaceAdapter,
     ToolRegistry,
     SafeCalculatorTool,

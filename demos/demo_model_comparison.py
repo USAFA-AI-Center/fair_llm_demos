@@ -1,6 +1,7 @@
 # demo_model_comparison.py
 import asyncio
 from typing import Dict
+import os
 
 """
 This module provides a tutorial on comparing the outputs of different Large
@@ -19,8 +20,10 @@ from fairlib import (
     ToolRegistry,
     ToolExecutor
 )
-
 from fairlib.core.interfaces.llm import AbstractChatModel # Keep interface for type hinting
+
+settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
+settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # --- Step 2: Create a simple factory to build agents ---
 # This helps keep our code clean when creating multiple identical agents.

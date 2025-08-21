@@ -1,5 +1,6 @@
 # multi_agent_demo.py
 import asyncio
+import os
 
 """
 This script serves as a hands-on tutorial and demonstration of the framework's
@@ -31,6 +32,9 @@ from fairlib import (
     ManagerPlanner,
     HierarchicalAgentRunner
 )
+
+settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
+settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # TODO:: this kind of function should be a utility available to all demo files
 def create_agent(llm, tools, role_description):

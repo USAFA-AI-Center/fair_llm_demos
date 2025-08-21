@@ -1,0 +1,57 @@
+[project]
+name = "fair-llm-demos"
+version = "0.1.0"
+description = "Demonstration scripts for the FAIR-LLM Framework"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "USAFA AI Center Team"},
+]
+license = {text = "MIT"}
+
+dependencies = [
+    "python-dotenv>=1.1.0",
+    "rich>=14.0.0",
+    # fair-llm package must be installed separately from private repo
+    # See installation instructions in README.md
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+
+# Installation Instructions
+# ========================
+# 
+# 1. Set environment variables:
+#    export OPENAI_API_KEY=your-openai-key
+#    export ANTHROPIC_API_KEY=your-anthropic-key
+#    export GH_TOKEN=your-github-token
+#
+# 2. Install the private package:
+#    pip install git+https://${GH_TOKEN}@github.com/USAFA-AI-Center/fair_llm.git
+#
+# 3. Or use the provided requirements.txt:
+#    pip install -r requirements.txt

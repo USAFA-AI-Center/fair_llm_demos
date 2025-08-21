@@ -85,6 +85,7 @@ python demo_programming_autograder.py --submissions submissions/ --rubric rubric
 Note: The `--tests` argument is not needed when using `--no-run`.
 ================================================================================
 """
+import os
 import asyncio
 import logging
 import argparse
@@ -100,6 +101,9 @@ from fairlib import (
     settings, OpenAIAdapter, HierarchicalAgentRunner, ManagerPlanner,
     CodeExecutionTool, GradeCodeFromRubricTool, WorkingMemory, SimpleAgent
 )
+
+settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
+settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 logger = logging.getLogger(__name__)
 

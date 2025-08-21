@@ -94,6 +94,7 @@ generate a detailed `.txt` report for each one in the `graded_essays` folder.
 
 ================================================================================
 """
+import os
 import asyncio
 import logging
 import argparse
@@ -109,6 +110,9 @@ from fairlib import (
     settings, OpenAIAdapter, HierarchicalAgentRunner, ManagerPlanner, SimpleRetriever,
     KnowledgeBaseQueryTool, GradeEssayFromRubricTool, WorkingMemory, SimpleAgent  
 )
+
+settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
+settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # Configure logger for this specific module
 logger = logging.getLogger(__name__)

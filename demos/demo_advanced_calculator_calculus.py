@@ -15,12 +15,9 @@ import asyncio
 
 # --- Step 1: Import necessary framework components ---
 from fairlib import (
-    settings,
-    OpenAIAdapter,
     ToolRegistry,
     ToolExecutor,
     WorkingMemory,
-    ReActPlanner,
     SimpleAgent,
     SafeCalculatorTool,
     RoleDefinition, 
@@ -43,12 +40,6 @@ async def main():
     print("🔧 Initializing the Advanced Calculator + Calculus Agent...")
 
     # === (a) Brain: Language Model ===
-    # Uses OpenAI GPT-4 for reasoning and decision making
-   # llm = OpenAIAdapter(
-   #     api_key=settings.api_keys.openai_api_key,
-   #     model_name=settings.models["openai_gpt4"].model_name
-   # )
-
     llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
     
     # === (b) Toolbelt: Register both calculator and calculus tools ===

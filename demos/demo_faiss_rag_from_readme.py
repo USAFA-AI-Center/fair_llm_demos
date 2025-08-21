@@ -10,7 +10,7 @@ This mirrors demo_rag_from_documents.py, but:
   • Always re-ranks via CrossEncoder
   • Runs the full ReACT agent loop
 """
-
+import os
 import asyncio
 import logging
 from pathlib import Path
@@ -34,6 +34,9 @@ from fairlib.utils.document_processor import DocumentProcessor
 from fairlib.modules.memory.vector_faiss import FaissVectorStore
 from fairlib.modules.memory.retriever_rerank import CrossEncoderRerankingRetriever
 from sentence_transformers import CrossEncoder
+
+settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
+settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("demo_faiss_rag_from_documents")

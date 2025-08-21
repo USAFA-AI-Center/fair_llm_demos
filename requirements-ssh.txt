@@ -1,0 +1,12 @@
+# Core dependencies for demos
+python-dotenv>=1.1.0
+rich>=14.0.0  # For nice terminal output in verify script
+
+# The private FAIR-LLM package via SSH
+# IMPORTANT: Ensure your SSH key is added to GitHub first:
+# ssh -T git@github.com
+#
+# Then install with:
+# pip install -r requirements-ssh.txt
+#
+git+ssh://git@github.com/USAFA-AI-Center/fair_llm.git@main#egg=fair-llm
