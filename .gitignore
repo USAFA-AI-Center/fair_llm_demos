@@ -1,3 +1,8 @@
+# Ignore files created by the demos
+demos/outputs/
+demos/coding_autograder_files/reports/
+demos/essay_autograder_files/graded_essays/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

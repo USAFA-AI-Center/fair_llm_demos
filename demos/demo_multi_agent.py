@@ -33,10 +33,12 @@ from fairlib import (
     HierarchicalAgentRunner
 )
 
+from dotenv import load_dotenv
+load_dotenv()
+
 settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
 settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
-# TODO:: this kind of function should be a utility available to all demo files
 def create_agent(llm, tools, role_description):
     """
     A helper factory function to simplify the creation of worker agents.

@@ -35,6 +35,9 @@ from fairlib.modules.memory.vector_faiss import FaissVectorStore
 from fairlib.modules.memory.retriever_rerank import CrossEncoderRerankingRetriever
 from sentence_transformers import CrossEncoder
 
+from dotenv import load_dotenv
+load_dotenv()
+
 settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
 settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 

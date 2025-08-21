@@ -111,6 +111,9 @@ from fairlib import (
     KnowledgeBaseQueryTool, GradeEssayFromRubricTool, WorkingMemory, SimpleAgent  
 )
 
+from dotenv import load_dotenv
+load_dotenv()
+
 settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
 settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
@@ -127,6 +130,8 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     essay_filename = Path(essay_doc.metadata.get("source", "unknown_essay")).name
     logger.info(f"--- Starting essay grading for: {essay_filename} ---")
 
+    rubric_text = "\n".join([doc.page_content for doc in rubric])
+    
     llm = OpenAIAdapter(api_key=settings.api_keys.openai_api_key, model_name=settings.models.get("openai_gpt4", {"model_name": "gpt-4o"}).model_name)
 
     # --- Create the "Grading Committee" using tools from the framework ---
@@ -179,7 +184,7 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     Workflow Steps:
     {"".join([f"{i+1}. {step}\n" for i, step in enumerate(workflow_steps)])}
     **Rubric:**
-    {rubric}
+    {rubric_text}
 
     **Student Essay to be Graded:**
     {essay_text}
@@ -200,7 +205,7 @@ async def main(essays_dir, rubric_path, output_dir, materials_dir):
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
 
-    doc_proc = DocumentProcessor() # TODO:: TEST AND ENSURE THIS IS WORKING WITH REMOVAL OF DOC LOADER IN AUTO_GRADER UTILS
+    doc_proc = DocumentProcessor()
     rubric_content = doc_proc.process_file(str(Path(rubric_path)))
     if not rubric_content:
         logger.critical(f"Could not load rubric from '{rubric_path}'. Exiting.")

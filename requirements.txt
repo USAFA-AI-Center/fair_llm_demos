@@ -4,13 +4,5 @@ rich>=14.0.0  # For nice terminal output in verify script
 anthropic>=0.5.0 # for some demos
 faiss-cpu>=1.7.0 # for the FAISS demo
 seaborn>=0.13.0 # for the graphing demo
-
-# The private FAIR-LLM package
-# IMPORTANT: Set the GH_TOKEN environment variable first:
-# export GH_TOKEN=your_github_personal_access_token
-#
-# Then install with:
-# pip install -r requirements.txt
-#
-# The package will be installed from:
-git+https://${GH_TOKEN}@github.com/USAFA-AI-Center/fair_llm.git@main#egg=fair-llm
+fair-llm>=0.1 # fair package
+pytest>=8.0.0

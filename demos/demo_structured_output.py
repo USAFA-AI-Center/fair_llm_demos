@@ -36,6 +36,9 @@ form. Examples include:
 from fairlib import settings, Message, OpenAIAdapter
 from fairlib.core.interfaces.llm import AbstractChatModel # Keep this as it's an interface, not a concrete class
 
+from dotenv import load_dotenv
+load_dotenv()
+
 settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
 settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 

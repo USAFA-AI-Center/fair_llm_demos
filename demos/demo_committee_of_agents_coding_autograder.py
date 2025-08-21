@@ -189,7 +189,7 @@ async def main(submissions_dir, rubric_path, output_dir, tests_path=None, run_te
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
 
-    doc_proc = DocumentProcessor() # TODO:: TEST AND ENSURE THIS IS WORKING WITH REMOVAL OF DOC LOADER IN AUTO_GRADER UTILS
+    doc_proc = DocumentProcessor()
     rubric_content = doc_proc.process_file(str(Path(rubric_path)))
     if not rubric_content:
         logger.critical(f"Could not load rubric from '{rubric_path}'. Exiting.")
@@ -238,14 +238,5 @@ if __name__ == "__main__":
     # Create dummy files and folders for demonstration if they don't exist
     Path(args.submissions).mkdir(exist_ok=True)
     Path(args.output).mkdir(exist_ok=True)
-
-    if not list(Path(args.submissions).glob('*')):
-        (Path(args.submissions) / "student1_assignment.py").write_text("def add(a, b):\n    return a + b\n")
-    
-    if run_tests_flag and args.tests and not Path(args.tests).exists():
-        (Path(args.tests)).write_text("from temp_student_code import add\n\ndef test_add():\n    assert add(2, 3) == 5\n\ndef test_add_negative():\n    assert add(-1, -1) == -2\n")
-
-    if not Path(args.rubric).exists():
-        (Path(args.rubric)).write_text("- Correctness (10 pts): Passes all unit tests.\n- Style (5 pts): Follows PEP 8.")
 
     asyncio.run(main(args.submissions, args.rubric, args.output, args.tests, run_tests_flag))
