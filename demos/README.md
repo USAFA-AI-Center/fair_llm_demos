@@ -1,0 +1,2 @@
+# FAIR-LLM Framework
+FAIR-LLM is a Python framework for building modular agentic applications. Its fairlib.core.principles are being Flexible, Agnostic, and Interoperable. A key feature is the Model Abstraction Layer (MAL), which allows switching LLM providers easily. It also supports multi-agent collaboration through a HierarchicalAgentRunner.
