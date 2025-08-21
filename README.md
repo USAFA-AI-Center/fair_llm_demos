@@ -9,7 +9,7 @@
 ### Step 1: Clone the Repository (for demos)
 
 ```bash
-git clone https://github.com/yourusername/fair-llm-demos.git
+git clone git@github.com:USAFA-AI-Center/fair_llm_demos.git
 cd fair-llm-demos
 ```
 
