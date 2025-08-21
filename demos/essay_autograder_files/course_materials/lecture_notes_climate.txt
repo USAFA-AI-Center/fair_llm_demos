@@ -1,0 +1,30 @@
+LECTURE 10: CLIMATE CHANGE AND AGRICULTURAL SYSTEMS
+
+Key Points from Today's Lecture:
+
+1. Temperature Impacts on Crop Physiology
+- Optimal temperature ranges: Wheat (15-20°C), Rice (20-30°C), Maize (18-27°C)
+- Heat stress reduces photosynthesis efficiency by up to 40%
+- Critical temperature thresholds cause permanent damage to reproductive organs
+
+2. IPCC Sixth Assessment Report (2021) - Key Findings
+- Global surface temperature increased by 1.09°C (0.95-1.20°C) from 1850-1900 to 2011-2020
+- Agricultural regions experiencing 1.5x the global average warming
+- Projected yield reductions: 10-25% by 2050 under intermediate scenarios (SSP2-4.5)
+
+3. Regional Vulnerability Assessment
+- Sub-Saharan Africa: 20% yield reduction already observed in some regions
+- South Asia: 40% increase in monsoon variability (2015-2020)
+- Small Island Developing States: Existential threat from sea-level rise
+
+4. Adaptation Strategies Discussed
+- Climate-Smart Agriculture (CSA) - three pillars: productivity, adaptation, mitigation
+- Drought-tolerant varieties showing 20-30% yield improvement under stress
+- Precision agriculture reducing resource use by up to 50%
+
+5. Economic Dimensions
+- $80 billion annual investment needed for agricultural adaptation in developing countries
+- Current climate finance for agriculture: approximately $10 billion/year
+- Cost of inaction: $1.5 trillion by 2050 in lost agricultural GDP
+
+Remember for exam: Be able to cite specific statistics and explain causal mechanisms

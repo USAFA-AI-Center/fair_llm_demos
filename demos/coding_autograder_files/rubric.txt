@@ -1,0 +1,34 @@
+=== Programming Assignment 1: Calculator Functions ===
+
+GRADING CRITERIA:
+
+1. CORRECTNESS (40 points)
+   - All unit tests pass (30 pts)
+   - Edge cases handled properly (10 pts)
+
+2. CODE QUALITY (25 points)
+   - Follows PEP 8 style guidelines (10 pts)
+   - Clear and meaningful variable names (5 pts)
+   - Appropriate code organization (5 pts)
+   - No unnecessary complexity (5 pts)
+
+3. DOCUMENTATION (20 points)
+   - All functions have docstrings (10 pts)
+   - Docstrings describe parameters and return values (5 pts)
+   - Inline comments where appropriate (5 pts)
+
+4. ERROR HANDLING (10 points)
+   - Division by zero handled correctly (5 pts)
+   - Appropriate error messages (5 pts)
+
+5. ALGORITHMIC EFFICIENCY (5 points)
+   - Efficient implementation of all functions (5 pts)
+
+TOTAL: 100 points
+
+GRADE SCALE:
+- A: 90-100 points
+- B: 80-89 points
+- C: 70-79 points
+- D: 60-69 points
+- F: Below 60 points

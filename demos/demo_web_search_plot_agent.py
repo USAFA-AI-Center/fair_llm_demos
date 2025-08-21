@@ -20,6 +20,12 @@ The scenario: A user wants to perform a task that requires both real-time
 information gathering (research) and graph generation (code creation and execution). No single
 agent can solve this alone, but by collaborating, the team can deliver a
 comprehensive solution.
+
+IMPORTANT NOTE: This demo does not consistently create graphing outputs. It is very dependent upon the results
+outputted from the web_searcher. If it is able to hit a good link for the data extractor, a graph can be generated in
+demos/outputs/. If you want to get a graph out of this demo, keep running it. Further improvements need to be
+made to the data_extractor tool and the graphing tool in FAIR_LLM. A code validation agent may also allow
+more consistent graphing outputs.
 """
 
 # --- Step 1: Import all necessary components ---

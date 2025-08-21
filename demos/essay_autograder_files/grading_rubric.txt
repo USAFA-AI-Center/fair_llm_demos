@@ -1,0 +1,49 @@
+=== Essay Grading Rubric: Climate Change and Food Security ===
+
+TOTAL POINTS: 100
+
+1. THESIS STATEMENT AND ARGUMENT STRUCTURE (20 points)
+   - Clear, specific, and arguable thesis statement (8 pts)
+   - Thesis is appropriately placed in introduction (2 pts)
+   - Essay structure logically supports the thesis (5 pts)
+   - Conclusion effectively reinforces thesis (5 pts)
+
+2. CONTENT KNOWLEDGE AND ACCURACY (25 points)
+   - Demonstrates understanding of climate science basics (5 pts)
+   - Accurately describes climate impacts on agriculture (10 pts)
+   - Correctly cites statistics and scientific findings (5 pts)
+   - Shows knowledge of course materials and lectures (5 pts)
+
+3. EVIDENCE AND ANALYSIS (25 points)
+   - Uses specific, relevant examples (8 pts)
+   - Properly integrates evidence into arguments (7 pts)
+   - Demonstrates critical thinking and analysis (10 pts)
+
+4. DEPTH AND COMPLEXITY (15 points)
+   - Addresses multiple dimensions (environmental, social, economic) (5 pts)
+   - Discusses regional variations and inequalities (5 pts)
+   - Presents balanced view of challenges and solutions (5 pts)
+
+5. WRITING QUALITY AND CLARITY (10 points)
+   - Clear, grammatically correct sentences (3 pts)
+   - Proper paragraph structure and transitions (3 pts)
+   - Appropriate academic tone and vocabulary (2 pts)
+   - Free from spelling and punctuation errors (2 pts)
+
+6. CITATIONS AND ACADEMIC INTEGRITY (5 points)
+   - Properly cites sources when needed (3 pts)
+   - Avoids plagiarism (2 pts)
+
+GRADE SCALE:
+- A (90-100): Exceptional work demonstrating mastery of content and excellent writing
+- B (80-89): Good work with solid understanding and clear communication
+- C (70-79): Satisfactory work meeting basic requirements
+- D (60-69): Below average work with significant weaknesses
+- F (0-59): Failing work that does not meet minimum standards
+
+SPECIFIC EXPECTATIONS:
+- Essays should be 1500-2000 words
+- Must reference at least 3 concepts from course lectures
+- Should demonstrate understanding of IPCC findings
+- Must discuss both impacts and potential solutions
+- Should address equity and justice dimensions

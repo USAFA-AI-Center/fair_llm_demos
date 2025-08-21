@@ -1,6 +1,9 @@
 # Core dependencies for demos
 python-dotenv>=1.1.0
 rich>=14.0.0  # For nice terminal output in verify script
+anthropic>=0.5.0 # for some demos
+faiss-cpu>=1.7.0 # for the FAISS demo
+seaborn>=0.13.0 # for the graphing demo
 
 # The private FAIR-LLM package via SSH
 # IMPORTANT: Ensure your SSH key is added to GitHub first:

@@ -78,9 +78,16 @@ async def main():
     print("Building the agent team...")
     
     # The Researcher: Its only tool is the WebSearcher. Its role is clearly defined.
+    web_search_config = {
+        "google_api_key": settings.search_engine.google_cse_search_api,
+        "google_search_engine_id": settings.search_engine.google_cse_search_engine_id,
+        "cache_ttl": settings.search_engine.web_search_cache_ttl,
+        "cache_max_size": settings.search_engine.web_search_cache_max_size,
+        "max_results": settings.search_engine.web_search_max_results,
+    }
     researcher = create_agent(
         llm,
-        [WebSearcherTool()],
+        [WebSearcherTool(config=web_search_config)],
         "A research agent that uses a web search tool to find current, real-time information like prices, news, and facts."
     )
 
