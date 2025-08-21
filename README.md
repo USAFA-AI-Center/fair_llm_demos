@@ -1,228 +1,157 @@
-# FAIR-LLM Demo Repository
+# FAIR-LLM Installation Guide
 
-This repository contains demonstration scripts for the FAIR-LLM (Flexible, Agnostic, and Interoperable Reasoning) Framework - a powerful system for building modular agentic AI applications.
-
-## 🚀 Quick Start
+## 🚀 Quick Installation
 
 ### Prerequisites
+- Python 3.8 or higher
+- pip package manager
 
-- Python 3.11 or higher (required by fair-llm)
-- pip (Python package installer)
-- Git
-- GitHub account with access to the private FAIR-LLM repository
-- API keys for OpenAI and Anthropic
-
-### Installation
-
-#### Step 1: Clone this Demo Repository
+### Step 1: Clone the Repository (for demos)
 
 ```bash
 git clone https://github.com/yourusername/fair-llm-demos.git
 cd fair-llm-demos
 ```
 
-#### Step 2: Set Up Virtual Environment
+### Step 2: Install All Dependencies
+
+Simply install everything needed using the requirements file:
 
 ```bash
-# Create virtual environment
-python -m venv venv
-
-# Activate it
-# On Linux/Mac:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
-```
-
-#### Step 3: Configure GitHub Access for Private Repository
-
-Since the main `fair-llm` package is in a private repository, you need to authenticate with GitHub.
-
-**Option A: Using Personal Access Token (Recommended)**
-
-1. Generate a GitHub Personal Access Token:
-   - Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
-   - Click "Personal access tokens" → "Tokens (classic)" → "Generate new token"
-   - Give it a name (e.g., "fair-llm-access")
-   - Select the `repo` scope (full control of private repositories)
-   - Copy the token immediately (you won't see it again!)
-
-2. Set the token as an environment variable:
-   ```bash
-   export GH_TOKEN=your_github_token_here
-   ```
-
-**Option B: Using SSH Key**
-
-1. Ensure your SSH key is added to GitHub:
-   ```bash
-   ssh -T git@github.com  # Test SSH connection
-   ```
-
-#### Step 4: Install Dependencies
-
-```bash
-# Install all dependencies including the private fair-llm package (Option A):
 pip install -r requirements.txt
-
-# Or if using SSH (Option B):
-pip install -r requirements-ssh.txt
 ```
 
-#### Step 5: Configure API Keys
+This will install:
+- `fair-llm>=0.1` - The core FAIR-LLM package
+- `python-dotenv` - For environment variable management
+- `rich` - For beautiful terminal output
+- `anthropic` - For Anthropic Claude integration
+- `faiss-cpu` - For vector search capabilities
+- `seaborn` - For data visualization
+- `pytest` - For testing
 
-Set the required environment variables:
+### Step 3: Set Up API Keys
+
+Create a `.env` file in your project root:
 
 ```bash
-# Copy the environment template
+# Copy the example file
 cp .env.example .env
 
-# Edit .env and add your actual API keys:
-# OPENAI_API_KEY=your-actual-openai-key
-# ANTHROPIC_API_KEY=your-actual-anthropic-key
+# Or create a new one
+echo "OPENAI_API_KEY=your_openai_api_key_here" > .env
+echo "ANTHROPIC_API_KEY=your_anthropic_api_key_here" >> .env
 ```
 
-Or export them directly:
+Or export them as environment variables:
 
 ```bash
-export OPENAI_API_KEY="your-openai-api-key"
-export ANTHROPIC_API_KEY="your-anthropic-api-key"
+export OPENAI_API_KEY="your_openai_api_key_here"
+export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
 ```
 
-#### Step 6: Verify Installation
+### Step 4: Verify Installation
 
-Run the verification script to ensure everything is properly configured:
+Run the verification script:
 
 ```bash
 python verify_setup.py
 ```
 
-This will check:
-- ✓ Python version (3.11+)
-- ✓ Package installation
-- ✓ API key configuration  
-- ✓ FAIR-LLM import functionality
-- ✓ Basic tool functionality
+You should see a colorful output showing all components are properly installed!
 
-## 📚 Available Demos
+## 🎯 Running the Demos
 
-### Core Demonstrations
+Once installed, try the demo scripts:
 
-1. **Single Agent with Calculator** (`demo_single_agent_calculator.py`)
-   - Introduction to building a basic agent with tool usage
-   - Learn the fundamental components: LLM, Tools, Memory, Planner
+### Essay Autograder Demo
+```bash
+# Basic grading
+python demos/demo_committee_of_agents_essay_autograder.py \
+  --essays essay_autograder_files/essays_to_grade/ \
+  --rubric essay_autograder_files/grading_rubric.txt \
+  --output essay_autograder_files/graded_essays/
 
-2. **Multi-Agent Collaboration** (`multi_agent_demo.py`)
-   - Advanced hierarchical multi-agent system
-   - Manager agent delegating to specialized workers
-   - Real-world example: Bitcoin price research + calculation
+# With RAG fact-checking
+python demos/demo_committee_of_agents_essay_autograder.py \
+  --essays essay_autograder_files/essays_to_grade/ \
+  --rubric essay_autograder_files/grading_rubric.txt \
+  --output essay_autograder_files/graded_essays/ \
+  --materials essay_autograder_files/course_materials/
+```
 
-3. **Advanced Calculator with Calculus** (`demo_advanced_calculator_calculus.py`)
-   - Agent using multiple mathematical tools
-   - Symbolic computation capabilities
+### Code Autograder Demo
+```bash
+# Static analysis only (safer)
+python demos/demo_committee_of_agents_coding_autograder.py \
+  --submissions coding_autograder_files/submissions/ \
+  --rubric coding_autograder_files/rubric.txt \
+  --output coding_autograder_files/reports/ \
+  --no-run
 
-4. **RAG from Documents** (`demo_rag_from_documents.py`)
-   - Retrieval-Augmented Generation implementation
-   - Document loading, splitting, and vector storage
-   - Knowledge base querying
+# With test execution (requires sandbox)
+python demos/demo_committee_of_agents_coding_autograder.py \
+  --submissions coding_autograder_files/submissions/ \
+  --tests coding_autograder_files/tests/test_calculator.py \
+  --rubric coding_autograder_files/rubric.txt \
+  --output coding_autograder_files/reports/
+```
 
-5. **Structured Output** (`demo_structured_output.py`)
-   - Reliable JSON extraction from unstructured text
-   - Pydantic validation and self-correction
+## 📦 Upgrading
 
-6. **Model Comparison** (`demo_model_comparison.py`)
-   - Compare responses from different LLM providers
-   - Demonstrates the Model Abstraction Layer
-
-### Running a Demo
+To upgrade to the latest versions:
 
 ```bash
-# Basic single agent demo
-python demo_single_agent_calculator.py
+# Upgrade all packages
+pip install --upgrade -r requirements.txt
 
-# Multi-agent collaboration demo
-python multi_agent_demo.py
-
-# Any other demo
-python demo_name.py
+# Or just upgrade fair-llm
+pip install --upgrade fair-llm
 ```
 
-## 🏗️ Framework Architecture Overview
+## 🐛 Troubleshooting
 
-The FAIR-LLM framework provides:
-
-- **🤖 Advanced Agent Patterns**: ReAct (Reason+Act) cognitive cycles
-- **🤝 Multi-Agent Collaboration**: Hierarchical manager-worker architectures
-- **🧠 RAG Support**: Document grounding and knowledge base integration
-- **🔌 Multiple LLM Support**: OpenAI, Anthropic, HuggingFace, Ollama
-- **🧩 Modular Design**: Interface-driven architecture for easy customization
-- **🛡️ Security**: Built-in input validation and sandboxed execution
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-1. **ModuleNotFoundError: No module named 'fairlib'**
-   - Ensure the private repository was installed correctly
-   - Check your GitHub token has the correct permissions
-   - Try reinstalling: `pip install --force-reinstall -r requirements.txt`
-
-2. **API Key Errors**
-   - Verify environment variables are set: `echo $OPENAI_API_KEY`
-   - Ensure `.env` file is in the project root
-   - Check API keys are valid and have sufficient credits
-
-3. **Python Version Issues**
-   - FAIR-LLM requires Python 3.11+
-   - Check version: `python --version`
-   - Consider using pyenv or conda for version management
-
-4. **GitHub Authentication Failed**
-   - Token expired or incorrect permissions
-   - For private repo access, token needs `repo` scope
-   - Try regenerating the token
-
-### Getting Help
-
-- Check the main [FAIR-LLM repository](https://github.com/USAFA-AI-Center/fair_llm) documentation
-- Review the Developer's Guide: "A Guide to the FAIR Agentic Framework.docx"
-- Open an issue in this demo repository for demo-specific problems
-- Contact the development team for framework issues
-
-## 📝 Project Structure
-
-```
-fair-llm-demos/
-├── demos/
-│   ├── multi_agent_demo.py    # Multi-agent collaboration
-│   ├── demo_single_agent_calculator.py
-│   └── ... (other demos)
-├── .env.example               # Environment variable template
-├── .env                       # Your actual env vars (git-ignored)
-├── requirements.txt           # Dependencies with token auth
-├── requirements-ssh.txt       # Dependencies with SSH auth
-├── verify_setup.py           # Installation verification script
-└── README.md                 # This file
+### Missing Dependencies
+If you get import errors, ensure all requirements are installed:
+```bash
+pip install -r requirements.txt --force-reinstall
 ```
 
-## 🤝 Contributing
+### API Key Issues
+The demos will create sample files if they don't exist, but ensure your API keys are set:
+```python
+python -c "import os; print('OpenAI Key:', 'Set' if os.getenv('OPENAI_API_KEY') else 'Not Set')"
+```
 
-To contribute new demos:
+### Virtual Environment Issues
+Always use a virtual environment to avoid conflicts:
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-1. Create a new demo file following the naming pattern `demo_*.py`
-2. Include comprehensive comments explaining the concepts
-3. Ensure all imports are from `fairlib`
-4. Test with both OpenAI and Anthropic models
-5. Submit a pull request with a description of what the demo teaches
+## 📚 What's Included
 
-## 📜 License
+After installation, you'll have:
+- ✅ The complete FAIR-LLM framework
+- ✅ Multi-agent orchestration capabilities
+- ✅ Document processing tools
+- ✅ Vector search with FAISS
+- ✅ Beautiful terminal output with Rich
+- ✅ Complete demo applications
 
-This demo repository is MIT licensed. The main FAIR-LLM framework license can be found in the private repository.
+## 🎉 Next Steps
 
-## 🙏 Acknowledgments
+1. Run `python verify_setup.py` to confirm everything is working
+2. Explore the `demos/` folder for examples
+3. Set up and run some demos
+4. Start building your own multi-agent demo files!
 
+## 👥 Contributors
 Developed by the USAFA AI Center team:
-- Ryan R (rrabinow@uccs.edu)
-- Austin W (austin.w@ardentinc.com)  
-- Eli G (elijah.g@ardentinc.com)
-- Chad M (Chad.Mello@afacademy.af.edu)
+
+Ryan R (rrabinow@uccs.edu)
+Austin W (austin.w@ardentinc.com)
+Eli G (elijah.g@ardentinc.com)
+Chad M (Chad.Mello@afacademy.af.edu)
