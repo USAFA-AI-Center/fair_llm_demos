@@ -1,7 +1,6 @@
 # demo_model_comparison.py
 import asyncio
 from typing import Dict
-import os
 
 """
 This module provides a tutorial on comparing the outputs of different Large
@@ -11,22 +10,15 @@ Model Abstraction Layer (MAL).
 
 # --- Step 1: Import all necessary components ---
 from fairlib import (
-    settings,
-    OpenAIAdapter,
-    AnthropicAdapter,
+    HuggingFaceAdapter,
     SimpleAgent,
     WorkingMemory,
     ReActPlanner,
     ToolRegistry,
     ToolExecutor
 )
+
 from fairlib.core.interfaces.llm import AbstractChatModel # Keep interface for type hinting
-
-from dotenv import load_dotenv
-load_dotenv()
-
-settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
-settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # --- Step 2: Create a simple factory to build agents ---
 # This helps keep our code clean when creating multiple identical agents.
@@ -55,39 +47,29 @@ async def main():
     
     models: Dict[str, AbstractChatModel] = {}
     
-    # Try to initialize OpenAI model
-    if settings.api_keys.openai_api_key:
-        openai_config = settings.models.get("openai_gpt4") # Or another configured OpenAI model
-        if openai_config:
-            models["OpenAI"] = OpenAIAdapter(
-                api_key=settings.api_keys.openai_api_key,
-                model_name=openai_config.model_name
-            )
-            print("✅ OpenAI model initialized.")
-        else:
-            print("- OpenAI model settings not found in config.")
+    # initialize models for comparison
+    models["dolphin3-qwen25-3b"] = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    models["dolphin3-qwen25-0.5b"] = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
 
-    # Try to initialize Anthropic model
-    if settings.api_keys.anthropic_api_key:
-        anthropic_config = settings.models.get("anthropic_claude") # Or another configured Anthropic model
-        if anthropic_config:
-            # This assumes an 'AnthropicAdapter' exists in your 'mal' directory
-            # similar to the OpenAI one.
-            models["Anthropic"] = AnthropicAdapter(
-                api_key=settings.api_keys.anthropic_api_key,
-                model_name=anthropic_config.model_name
-            )
-            print("✅ Anthropic model initialized.")
-        else:
-            print("- Anthropic model settings not found in config.")
-            
     if not models:
         print("\n❌ No valid models were initialized. Please check your API keys and configuration in `config/settings.yml`.")
         return
 
     # --- Step 4: Create an Identical Agent for Each Model ---
     print("\nCreating an agent for each initialized model...")
-    role = "a creative poet"
+    # descriptive role to give to each agent
+    role = """You are a creative poet who responds directly with your poetry.
+
+            CRITICAL INSTRUCTIONS:
+            - You do NOT have access to any tools, functions, or external systems
+            - You must respond ONLY with plain text - never attempt to call functions or use tools
+            - Write your poems directly in your response
+            - Do NOT use JSON, function calls, or tool invocations of any kind
+            - Simply write the poem as natural text in your reply
+
+            When asked to write a poem, immediately begin writing the poem itself. 
+            Do not describe what tools you would use or mention any functions. Just write the poem."""
+    
     agents = {
         name: create_comparison_agent(model, role) for name, model in models.items()
     }

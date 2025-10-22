@@ -1,5 +1,4 @@
 # demo_advanced_calculator_calculus.py
-
 """
 This script demonstrates how to assemble a single intelligent agent that can reason,
 respond, and use tools in a mathematically rich environment.
@@ -10,7 +9,6 @@ The agent supports:
 
 This serves as a practical tutorial for combining multiple tools under the FAIR-LLM framework.
 """
-
 import asyncio
 
 # --- Step 1: Import necessary framework components ---
@@ -40,6 +38,7 @@ async def main():
     print("🔧 Initializing the Advanced Calculator + Calculus Agent...")
 
     # === (a) Brain: Language Model ===
+    # Uses dolphin3-qwen25-3b for reasoning and decision making
     llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
     
     # === (b) Toolbelt: Register both calculator and calculus tools ===

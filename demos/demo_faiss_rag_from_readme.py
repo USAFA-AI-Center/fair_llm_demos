@@ -1,4 +1,4 @@
-# demos/demo_faiss_rag_from_readme.py
+# demo_faiss_rag_from_readme.py
 """
 ================================================================================
         FAISS RAG Demonstration (Async, Always Re-Rank, Full ReACT Loop)
@@ -10,7 +10,7 @@ This mirrors demo_rag_from_documents.py, but:
   • Always re-ranks via CrossEncoder
   • Runs the full ReACT agent loop
 """
-import os
+
 import asyncio
 import logging
 from pathlib import Path
@@ -18,7 +18,7 @@ import shutil
 
 from fairlib import (
     settings,
-    OpenAIAdapter,
+    HuggingFaceAdapter,
     ToolRegistry,
     ToolExecutor,
     WorkingMemory,
@@ -34,12 +34,6 @@ from fairlib.utils.document_processor import DocumentProcessor
 from fairlib.modules.memory.vector_faiss import FaissVectorStore
 from fairlib.modules.memory.retriever_rerank import CrossEncoderRerankingRetriever
 from sentence_transformers import CrossEncoder
-
-from dotenv import load_dotenv
-load_dotenv()
-
-settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
-settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("demo_faiss_rag_from_documents")
@@ -70,10 +64,7 @@ async def main():
     rerank_k = min(top_k * pool_multiplier, max_initial_docs)
 
     try:
-        llm = OpenAIAdapter(
-            api_key=getattr(settings.api_keys, "openai_api_key"),
-            model_name=settings.models.get("openai_gpt4", {"model_name": "gpt-4o"}).model_name
-        )
+        llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
         embedder = SentenceTransformerEmbedder(model_name=embed_model)
     except Exception as e:
         logger.critical(f"Failed to initialize LLM or embedder: {e}", exc_info=True)
@@ -157,4 +148,13 @@ async def main():
         logger.warning(f"Could not remove FAISS store directory {index_dir}: {e}")
 
 if __name__ == "__main__":
+    # Ensure a dummy README.md exists for the demo to run out-of-the-box.
+    if not Path("README.md").exists():
+        Path("README.md").write_text(
+            "# FAIR-LLM Framework\n"
+            "FAIR-LLM is a Python framework for building modular agentic applications. "
+            "Its fairlib.core.principles are being Flexible, Agnostic, and Interoperable. "
+            "A key feature is the Model Abstraction Layer (MAL), which allows switching LLM providers easily. "
+            "It also supports multi-agent collaboration through a HierarchicalAgentRunner."
+        )
     asyncio.run(main())

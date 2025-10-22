@@ -53,8 +53,7 @@ from fairlib.utils.document_processor import DocumentProcessor
 # All other components are imported from the central `fairlib` API, promoting
 # consistency and ease of use.
 from fairlib import (
-    settings,
-    OpenAIAdapter,
+    HuggingFaceAdapter,
     ToolRegistry,
     ToolExecutor,
     WorkingMemory,
@@ -66,12 +65,6 @@ from fairlib import (
     SimpleRetriever,
     KnowledgeBaseQueryTool 
 )
-
-from dotenv import load_dotenv
-load_dotenv()
-
-settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
-settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # Configure logging for the demo
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -105,10 +98,7 @@ async def main():
         return
 
     try:
-        llm = OpenAIAdapter(
-            api_key=settings.api_keys.openai_api_key,
-            model_name=settings.models.get("openai_gpt4", {"model_name": "gpt-4o"}).model_name
-        )
+        llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
         embedder = SentenceTransformerEmbedder()
         
         # Using an in-memory ChromaDB client for this demonstration.

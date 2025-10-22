@@ -1,5 +1,5 @@
+# demo_multi_agent.py
 import asyncio
-import os
 
 """
 This script serves as a hands-on tutorial and demonstration of the framework's
@@ -15,18 +15,12 @@ The scenario: A user wants to perform a task that requires both real-time
 information gathering (research) and mathematical computation (analysis). No single
 agent can solve this alone, but by collaborating, the team can deliver a
 comprehensive solution.
-
-🎓 EDUCATIONAL NOTE:
-This demo automatically detects if Google API credentials are available.
-- Without credentials: Uses MockWebSearcherTool
-- With credentials: Uses real WebSearcherTool for live data
-To set up real search, see: google_api_setup.md
 """
 
 # --- Step 1: Import all necessary components ---
 from fairlib import (
     settings,
-    OpenAIAdapter,
+    HuggingFaceAdapter,
     ToolRegistry,
     SafeCalculatorTool,
     WebSearcherTool,
@@ -38,17 +32,7 @@ from fairlib import (
     HierarchicalAgentRunner
 )
 
-from demo_tools.mock_web_searcher import MockWebSearcherTool
-
-from dotenv import load_dotenv
-load_dotenv()
-
-# LOAD API KEYS AND SETTNGS FROM ENV VARS
-settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
-settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-settings.search_engine.google_cse_search_api = os.getenv("GOOGLE_CSE_SEARCH_API")
-settings.search_engine.google_cse_search_engine_id = os.getenv("GOOGLE_CSE_SEARCH_ENGINE_ID")
-
+# TODO:: this kind of function should be a utility available to all demo files
 def create_agent(llm, tools, role_description):
     """
     A helper factory function to simplify the creation of worker agents.
@@ -70,89 +54,81 @@ def create_agent(llm, tools, role_description):
     return agent
 
 
-def get_web_searcher_tool(cse_search_api, cse_engine_id):
-    if cse_search_api and cse_engine_id:
-        web_search_config = {
-            "google_api_key": cse_search_api,
-            "google_search_engine_id": cse_engine_id,
-            "cache_ttl": settings.search_engine.web_search_cache_ttl,
-            "cache_max_size": settings.search_engine.web_search_cache_max_size,
-            "max_results": settings.search_engine.web_search_max_results,
-        }
-        return WebSearcherTool(config=web_search_config)
-    else:
-        return MockWebSearcherTool()
-
 async def main():
     """
     The main function to set up and run the multi-agent system.
     """
-    
-    print("=" * 60)
-    print("🤖 Multi-Agent Collaboration Demo")
-    print("=" * 60)
-    
+    # check if the web search tool can be used
+    if not settings.search_engine.google_cse_search_api or not settings.search_engine.google_cse_search_engine_id:
+        print("A google search engine API key as well as search engine ID needs to be set to run this demo. Exiting...")
+        return
     # --- Step 2: Initialize Core Components ---
-    print("\n📚 Initializing fairlib.core.components...")
-    llm = OpenAIAdapter(
-        api_key=settings.api_keys.openai_api_key,
-        model_name=settings.models["openai_gpt4"].model_name
-    )
+    # We load our settings using the validated Pydantic configuration loader.
+    # This ensures all necessary API keys and model settings are present.
+    print("Initializing fairlib.core.components...")
+    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
 
     # --- Step 3: Create Specialized Worker Agents ---
-    print("👥 Building the agent team...")
+    # Here, we build our team of specialists. Each worker is a standard
+    # ReAct agent but is given a very specific role and a limited set of tools.
+
+    print("Building the agent team...")
     
-    # The get_web_searcher_tool function automatically chooses the right implementation
-    search_tool = get_web_searcher_tool(settings.search_engine.google_cse_search_api, settings.search_engine.google_cse_search_engine_id)
-    
-    # The Researcher: Its only tool is the WebSearcher
+    # The Researcher: Its only tool is the WebSearcher. Its role is clearly defined.
+    web_search_config = {
+            "google_api_key": settings.search_engine.google_cse_search_api,
+            "google_search_engine_id": settings.search_engine.google_cse_search_engine_id,
+            "cache_ttl": settings.search_engine.web_search_cache_ttl,
+            "cache_max_size": settings.search_engine.web_search_cache_max_size,
+            "max_results": settings.search_engine.web_search_max_results,
+    }
+
     researcher = create_agent(
-        llm, 
-        [search_tool],
+        llm,
+        [WebSearcherTool(config=web_search_config)],
         "A research agent that uses a web search tool to find current, real-time information like prices, news, and facts."
     )
-    print("   ✓ Researcher agent created")
 
-    # The Analyst: Its only tool is the SafeCalculator
+    # The Analyst: Its only tool is the SafeCalculator. It's designed for math.
     analyst = create_agent(
         llm,
         [SafeCalculatorTool()],
         "An analyst agent that performs mathematical calculations using a safe calculator."
     )
-    print("   ✓ Analyst agent created")
 
     # We organize the workers in a dictionary so the manager can find them by name.
     workers = {"Researcher": researcher, "Analyst": analyst}
 
     # --- Step 4: Create the Manager Agent ---
+    # The manager is a special type of agent. It doesn't have regular tools.
+    # Instead, its "tool" is the ability to delegate tasks to its workers.
+    # We equip it with the special `ManagerPlanner`.
     manager_memory = WorkingMemory()
     manager_planner = ManagerPlanner(llm, workers)
-    manager_agent = SimpleAgent(llm, manager_planner, None, manager_memory)
-    print("   ✓ Manager agent created")
+    
+    # Note: The manager's ToolExecutor is `None` because it should never execute
+    # a tool directly. Its planner will only produce 'delegate' or 'final_answer' actions.
+    manager_agent = SimpleAgent(llm, manager_planner, None, manager_memory) 
 
     # --- Step 5: Initialize the Hierarchical Runner ---
+    # The runner is the orchestrator that connects the manager to the workers
+    # and manages the overall flow of the conversation.
     team_runner = HierarchicalAgentRunner(manager_agent, workers)
-    print("\n🚀 Agent team ready!\n")
     
     # --- Step 6: Define a Complex User Query ---
-    print("=" * 60)
-    print("📋 USER QUERY:")
+    # This query is designed to be unsolvable by any single worker.
+    # It requires the Researcher to find the price and the Analyst to perform the calculation.
     user_query = "My budget is $5,000. Please find the current price of Bitcoin and then calculate exactly how many Bitcoins I can afford to buy."
-    print(f"   '{user_query}'")
-    print("=" * 60)
     
     # --- Step 7: Run the Agent Team ---
-    print("\n🔄 Starting multi-agent collaboration...\n")
-    print("-" * 40)
-    
+    # We call the `arun` method on the runner, which kicks off the entire
+    # collaborative process. The runner will print the internal thoughts
+    # and actions of the agents as it works.
     final_answer = await team_runner.arun(user_query)
     
     # --- Step 8: Display the Final Result ---
-    print("-" * 40)
-    print("\n✅ FINAL SYNTHESIZED ANSWER:")
-    print("=" * 60)
+    print("\n✅ --- FINAL Synthesized Answer ---")
     print(final_answer)
-    print("=" * 60)
 
 
 if __name__ == "__main__":

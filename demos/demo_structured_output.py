@@ -1,5 +1,4 @@
 # demo_structured_output.py
-import os
 import asyncio
 import json
 from pydantic import BaseModel, Field, ValidationError
@@ -33,14 +32,8 @@ form. Examples include:
 """
 
 # --- Step 1: Import all necessary components from the FAIR-LLM framework ---
-from fairlib import settings, Message, OpenAIAdapter
+from fairlib import settings, Message, HuggingFaceAdapter
 from fairlib.core.interfaces.llm import AbstractChatModel # Keep this as it's an interface, not a concrete class
-
-from dotenv import load_dotenv
-load_dotenv()
-
-settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
-settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # --- Step 2: Define the target data structure using Pydantic ---
 # This class is our "schema." It defines the exact structure and data types
@@ -145,10 +138,7 @@ async def main():
     
     # --- Step 5: Initialize the LLM from the framework's components ---
     print("Initializing components...")
-    llm = OpenAIAdapter(
-        api_key=settings.api_keys.openai_api_key,
-        model_name=settings.models["openai_gpt4"].model_name
-    )
+    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
     
     # --- Step 6: Create the agent and define the input text ---
     extraction_agent = ExtractionAgent(llm)

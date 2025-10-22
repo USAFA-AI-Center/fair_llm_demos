@@ -1,5 +1,4 @@
 # demo_committee_of_agents_coding_autograder.py
-# demo_programming_autograder.py
 """
 ================================================================================
         Multi-Agent AI Programming Assignment Autograder
@@ -85,7 +84,6 @@ python demo_programming_autograder.py --submissions submissions/ --rubric rubric
 Note: The `--tests` argument is not needed when using `--no-run`.
 ================================================================================
 """
-import os
 import asyncio
 import logging
 import argparse
@@ -94,19 +92,13 @@ import json
 
 # --- Step 1: Import from the new fairlib.utils.module and the central fairlib API ---
 from fairlib.utils.autograder_utils import (
-    create_agent, format_report, FinalGrade
+    create_agent, format_report
 )
 from fairlib.utils.document_processor import DocumentProcessor
 from fairlib import (
-    settings, OpenAIAdapter, HierarchicalAgentRunner, ManagerPlanner,
+    HuggingFaceAdapter, HierarchicalAgentRunner, ManagerPlanner,
     CodeExecutionTool, GradeCodeFromRubricTool, WorkingMemory, SimpleAgent
 )
-
-from dotenv import load_dotenv
-load_dotenv()
-
-settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
-settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +111,7 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
     submission_filename = Path(submission_doc.metadata.get("source", "unknown_submission")).name
     logger.info(f"--- Starting code grading for: {submission_filename} (Run tests: {run_tests}) ---")
 
-    llm = OpenAIAdapter(
-        api_key=settings.api_keys.openai_api_key,
-        model_name=settings.models.get("openai_gpt4", {"model_name": "gpt-4o"}).model_name
-    )
+    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
 
     # --- Define the "Code Review Committee" ---
     # Agents are created dynamically based on whether execution is needed.
@@ -189,7 +178,7 @@ async def main(submissions_dir, rubric_path, output_dir, tests_path=None, run_te
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
 
-    doc_proc = DocumentProcessor()
+    doc_proc = DocumentProcessor() # TODO:: TEST AND ENSURE THIS IS WORKING WITH REMOVAL OF DOC LOADER IN AUTO_GRADER UTILS
     rubric_content = doc_proc.process_file(str(Path(rubric_path)))
     if not rubric_content:
         logger.critical(f"Could not load rubric from '{rubric_path}'. Exiting.")
@@ -238,5 +227,14 @@ if __name__ == "__main__":
     # Create dummy files and folders for demonstration if they don't exist
     Path(args.submissions).mkdir(exist_ok=True)
     Path(args.output).mkdir(exist_ok=True)
+
+    if not list(Path(args.submissions).glob('*')):
+        (Path(args.submissions) / "student1_assignment.py").write_text("def add(a, b):\n    return a + b\n")
+    
+    if run_tests_flag and args.tests and not Path(args.tests).exists():
+        (Path(args.tests)).write_text("from temp_student_code import add\n\ndef test_add():\n    assert add(2, 3) == 5\n\ndef test_add_negative():\n    assert add(-1, -1) == -2\n")
+
+    if not Path(args.rubric).exists():
+        (Path(args.rubric)).write_text("- Correctness (10 pts): Passes all unit tests.\n- Style (5 pts): Follows PEP 8.")
 
     asyncio.run(main(args.submissions, args.rubric, args.output, args.tests, run_tests_flag))

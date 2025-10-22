@@ -1,7 +1,5 @@
 # single_agent_calculator_demo.py
 import asyncio
-import yaml
-from pathlib import Path
 
 """
 This script serves as a foundational tutorial for the FAIR-LLM framework.
@@ -23,13 +21,10 @@ from fairlib import (
     SafeCalculatorTool,
     ToolExecutor,
     WorkingMemory,
-    ReActPlanner,
     SimpleAgent, 
     SimpleReActPlanner,
     RoleDefinition
 )
-
-from fairlib.modules.mal import huggingface_adapter
 
 async def main():
     """
@@ -41,13 +36,6 @@ async def main():
     # An agent is composed of several key parts, which we instantiate here.
 
     # a) The "Brain": The Language Model
-    # We use our settings file to configure the LLM adapter.
-
-    #llm = OpenAIAdapter(
-    #    api_key=settings.api_keys.openai_api_key,
-    #    model_name=settings.models["openai_gpt4"].model_name
-    #)
-
     llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
 
     # b) The "Toolbelt": The Tool Registry and Tools
@@ -69,11 +57,8 @@ async def main():
     memory = WorkingMemory()
 
     # e) The "Mind": The Planner
-    # The ReActPlanner is responsible for the agent's reasoning process. It takes
+    # The SimpleReActPlanner is responsible for the agent's reasoning process. It takes
     # the user's request and the conversation history and decides what to do next.
-    
-    # For use with the more complex lanuage models
-    #planner = ReActPlanner(llm, tool_registry)
     
     # For use with simple, local models
     planner = SimpleReActPlanner(llm, tool_registry)
