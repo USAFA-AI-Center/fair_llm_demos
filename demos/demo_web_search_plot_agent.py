@@ -1,10 +1,6 @@
 # demo_web_search_plot_agent.py
-import os
 import asyncio
-import datetime
 from typing import List, Any, Dict
-
-from fairlib.modules.agent.multi_agent_runner import _create_default_manager_prompt_builder
 
 """
 This script serves as a hands-on tutorial and demonstration of the framework's
@@ -20,18 +16,12 @@ The scenario: A user wants to perform a task that requires both real-time
 information gathering (research) and graph generation (code creation and execution). No single
 agent can solve this alone, but by collaborating, the team can deliver a
 comprehensive solution.
-
-IMPORTANT NOTE: This demo does not consistently create graphing outputs. It is very dependent upon the results
-outputted from the web_searcher. If it is able to hit a good link for the data extractor, a graph can be generated in
-demos/outputs/. If you want to get a graph out of this demo, keep running it. Further improvements need to be
-made to the data_extractor tool and the graphing tool in FAIR_LLM. A code validation agent may also allow
-more consistent graphing outputs.
 """
 
 # --- Step 1: Import all necessary components ---
 from fairlib import (
     settings,
-    OpenAIAdapter,
+    HuggingFaceAdapter,
     ManagerPlanner,
     ToolRegistry,
     WebSearcherTool,
@@ -50,12 +40,6 @@ from fairlib import (
     PromptBuilder,
     AgentCapability
 )
-
-from dotenv import load_dotenv
-load_dotenv()
-
-settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
-settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 class AgentDescriptionBuilder:
     """Builds comprehensive, structured descriptions for agents"""
@@ -451,12 +435,14 @@ def create_enhanced_agent(
 
 # --- Step 5: Main Function ---
 async def main():
+    # check if the web search tool can be used
+    if not settings.search_engine.google_cse_search_api or not settings.search_engine.google_cse_search_engine_id:
+        print("A google search engine API key as well as search engine ID needs to be set to run this demo. Exiting...")
+        return
+    
     print("Initializing fairlib.core.components...")
     
-    llm = OpenAIAdapter(
-       api_key=settings.api_keys.openai_api_key,
-       model_name=settings.models["openai_gpt4"].model_name
-    )
+    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
 
     web_search_config = {
         "google_api_key": settings.search_engine.google_cse_search_api,

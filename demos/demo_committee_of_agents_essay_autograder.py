@@ -94,7 +94,6 @@ generate a detailed `.txt` report for each one in the `graded_essays` folder.
 
 ================================================================================
 """
-import os
 import asyncio
 import logging
 import argparse
@@ -103,19 +102,13 @@ import json
 
 # --- Step 1: Import from the new fairlib.utils.module and the central fairlib API ---
 from fairlib.utils.autograder_utils import (
-    setup_knowledge_base, create_agent, format_report, FinalGrade
+    setup_knowledge_base, create_agent, format_report
 )
 from fairlib.utils.document_processor import DocumentProcessor
 from fairlib import (
-    settings, OpenAIAdapter, HierarchicalAgentRunner, ManagerPlanner, SimpleRetriever,
+    HuggingFaceAdapter, HierarchicalAgentRunner, ManagerPlanner, SimpleRetriever,
     KnowledgeBaseQueryTool, GradeEssayFromRubricTool, WorkingMemory, SimpleAgent  
 )
-
-from dotenv import load_dotenv
-load_dotenv()
-
-settings.api_keys.openai_api_key = os.getenv("OPENAI_API_KEY")
-settings.api_keys.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # Configure logger for this specific module
 logger = logging.getLogger(__name__)
@@ -130,9 +123,7 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     essay_filename = Path(essay_doc.metadata.get("source", "unknown_essay")).name
     logger.info(f"--- Starting essay grading for: {essay_filename} ---")
 
-    rubric_text = "\n".join([doc.page_content for doc in rubric])
-    
-    llm = OpenAIAdapter(api_key=settings.api_keys.openai_api_key, model_name=settings.models.get("openai_gpt4", {"model_name": "gpt-4o"}).model_name)
+    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
 
     # --- Create the "Grading Committee" using tools from the framework ---
     fact_checker_tools = [KnowledgeBaseQueryTool(SimpleRetriever(knowledge_base.vector_store))] if knowledge_base else []
@@ -184,7 +175,7 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     Workflow Steps:
     {"".join([f"{i+1}. {step}\n" for i, step in enumerate(workflow_steps)])}
     **Rubric:**
-    {rubric_text}
+    {rubric}
 
     **Student Essay to be Graded:**
     {essay_text}
