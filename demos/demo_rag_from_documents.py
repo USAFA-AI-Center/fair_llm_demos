@@ -98,7 +98,7 @@ async def main():
         return
 
     try:
-        llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+        llm = HuggingFaceAdapter("dolphin3-qwen25-3b", auth_token="")
         embedder = SentenceTransformerEmbedder()
         
         # Using an in-memory ChromaDB client for this demonstration.

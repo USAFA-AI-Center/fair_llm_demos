@@ -36,7 +36,7 @@ async def main():
     # An agent is composed of several key parts, which we instantiate here.
 
     # a) The "Brain": The Language Model
-    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    llm = HuggingFaceAdapter("dolphin3-qwen25-3b", auth_token="")
 
     # b) The "Toolbelt": The Tool Registry and Tools
     # The registry holds all the tools the agent can use.

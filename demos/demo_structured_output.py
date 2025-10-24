@@ -138,7 +138,7 @@ async def main():
     
     # --- Step 5: Initialize the LLM from the framework's components ---
     print("Initializing components...")
-    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
+    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b", auth_token="")
     
     # --- Step 6: Create the agent and define the input text ---
     extraction_agent = ExtractionAgent(llm)

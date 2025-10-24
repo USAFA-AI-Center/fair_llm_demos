@@ -442,7 +442,7 @@ async def main():
     
     print("Initializing fairlib.core.components...")
     
-    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
+    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b", auth_token="")
 
     web_search_config = {
         "google_api_key": settings.search_engine.google_cse_search_api,

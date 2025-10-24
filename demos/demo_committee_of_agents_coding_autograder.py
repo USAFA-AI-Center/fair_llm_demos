@@ -111,7 +111,7 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
     submission_filename = Path(submission_doc.metadata.get("source", "unknown_submission")).name
     logger.info(f"--- Starting code grading for: {submission_filename} (Run tests: {run_tests}) ---")
 
-    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    llm = HuggingFaceAdapter("dolphin3-qwen25-3b", auth_token="")
 
     # --- Define the "Code Review Committee" ---
     # Agents are created dynamically based on whether execution is needed.

@@ -123,7 +123,7 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     essay_filename = Path(essay_doc.metadata.get("source", "unknown_essay")).name
     logger.info(f"--- Starting essay grading for: {essay_filename} ---")
 
-    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    llm = HuggingFaceAdapter("dolphin3-qwen25-3b", auth_token="")
 
     # --- Create the "Grading Committee" using tools from the framework ---
     fact_checker_tools = [KnowledgeBaseQueryTool(SimpleRetriever(knowledge_base.vector_store))] if knowledge_base else []

@@ -39,7 +39,7 @@ async def main():
 
     # === (a) Brain: Language Model ===
     # Uses dolphin3-qwen25-3b for reasoning and decision making
-    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    llm = HuggingFaceAdapter("dolphin3-qwen25-3b", auth_token="")
     
     # === (b) Toolbelt: Register both calculator and calculus tools ===
     tool_registry = ToolRegistry()

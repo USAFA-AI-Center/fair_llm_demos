@@ -66,7 +66,7 @@ async def main():
     # We load our settings using the validated Pydantic configuration loader.
     # This ensures all necessary API keys and model settings are present.
     print("Initializing fairlib.core.components...")
-    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
+    llm = HuggingFaceAdapter("dolphin3-qwen25-0.5b", auth_token="")
 
     # --- Step 3: Create Specialized Worker Agents ---
     # Here, we build our team of specialists. Each worker is a standard
