@@ -48,8 +48,8 @@ async def main():
     models: Dict[str, AbstractChatModel] = {}
     
     # initialize models for comparison
-    models["dolphin3-qwen25-3b"] = HuggingFaceAdapter("dolphin3-qwen25-3b", auth_token="")
-    models["dolphin3-qwen25-0.5b"] = HuggingFaceAdapter("dolphin3-qwen25-0.5b", auth_token="")
+    models["dolphin3-qwen25-3b"] = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    models["dolphin3-qwen25-0.5b"] = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
 
     if not models:
         print("\n❌ No valid models were initialized. Please check your API keys and configuration in `config/settings.yml`.")

@@ -64,7 +64,7 @@ async def main():
     rerank_k = min(top_k * pool_multiplier, max_initial_docs)
 
     try:
-        llm = HuggingFaceAdapter("dolphin3-qwen25-3b", auth_token="")
+        llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
         embedder = SentenceTransformerEmbedder(model_name=embed_model)
     except Exception as e:
         logger.critical(f"Failed to initialize LLM or embedder: {e}", exc_info=True)
