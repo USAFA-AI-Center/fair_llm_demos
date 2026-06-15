@@ -32,7 +32,7 @@ form. Examples include:
 """
 
 # --- Step 1: Import all necessary components from the FAIR-LLM framework ---
-from fairlib import settings, Message, HuggingFaceAdapter
+from fairlib import Message, HuggingFaceAdapter
 from fairlib.core.interfaces.llm import AbstractChatModel # Keep this as it's an interface, not a concrete class
 
 # --- Step 2: Define the target data structure using Pydantic ---

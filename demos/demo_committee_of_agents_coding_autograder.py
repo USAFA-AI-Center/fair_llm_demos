@@ -178,7 +178,7 @@ async def main(submissions_dir, rubric_path, output_dir, tests_path=None, run_te
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
 
-    doc_proc = DocumentProcessor() # TODO:: TEST AND ENSURE THIS IS WORKING WITH REMOVAL OF DOC LOADER IN AUTO_GRADER UTILS
+    doc_proc = DocumentProcessor()
     rubric_content = doc_proc.process_file(str(Path(rubric_path)))
     if not rubric_content:
         logger.critical(f"Could not load rubric from '{rubric_path}'. Exiting.")

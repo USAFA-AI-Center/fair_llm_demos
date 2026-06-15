@@ -20,7 +20,6 @@ For the v4-focused walkthrough, see demo_huggingface_v4.py.
 # --- Step 1: Import the necessary components ---
 from fairlib.modules.mal.huggingface_adapter import (
     HuggingFaceAdapter,
-    MODEL_REGISTRY,
     TRANSFORMERS_V5,
 )
 from fairlib.core.message import Message

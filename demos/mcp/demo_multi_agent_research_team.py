@@ -75,18 +75,11 @@ from fairlib import settings
 # `Message` is the universal currency of communication between agents and LLMs.
 # `Thought`, `Action`, `Observation`, `FinalAnswer` are the ReAct loop primitives.
 # `Document` is used in RAG pipelines for chunked text with metadata.
-from fairlib import Message, Thought, Action, Observation, FinalAnswer, Document
 
 # --- 1c. Prompt Engineering ---
 # The PromptBuilder system lets you construct structured prompts from composable
 # pieces. Each piece is a `PromptItem` subclass that renders to a string.
 from fairlib import (
-    PromptBuilder,          # The main builder that assembles all pieces
-    RoleDefinition,         # Defines who the agent IS (its persona/goal)
-    ToolInstruction,        # Describes a single available tool
-    WorkerInstruction,      # Describes a single available worker agent
-    FormatInstruction,      # Rules for how the LLM should format output
-    Example,                # Few-shot examples to guide behavior
     AgentCapability,        # Structured description of what an agent can do
 )
 

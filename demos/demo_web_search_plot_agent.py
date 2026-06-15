@@ -1,5 +1,4 @@
 # demo_web_search_plot_agent.py
-# TODO:: pull this functionality out to a more robust place
 import asyncio
 from typing import List, Any, Dict
 

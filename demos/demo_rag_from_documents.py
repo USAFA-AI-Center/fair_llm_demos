@@ -35,7 +35,6 @@ knowledge-grounded agent.
 import asyncio
 import logging
 from pathlib import Path
-import os
 
 try:
     import chromadb
@@ -137,8 +136,8 @@ async def main():
     chunks = split_text(document[0].page_content)
     logger.info(f"Document split into {len(chunks)} chunks.")
 
-    # Add the document chunks to the long-term memory (vector store).
-    long_term_memory.vector_store.add_documents(chunks)
+    # Add the document chunks to the long-term memory (it wraps text into Documents).
+    long_term_memory.add_document(chunks)
     logger.info("✅ Document successfully ingested into Long-Term Memory.")
 
     # --- Step 4: Create the RAG-Powered Agent ---

@@ -55,7 +55,7 @@ def create_filesystem_server(allowed_directory: str) -> Server:
             resolved = (allowed_path / path).resolve()
 
         if not str(resolved).startswith(str(allowed_path)):
-            raise ValueError(f"Access denied: path outside allowed directory")
+            raise PermissionError("Access denied: path outside allowed directory")
 
         return resolved
 

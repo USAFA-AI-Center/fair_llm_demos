@@ -32,7 +32,6 @@ from fairlib import (
     HierarchicalAgentRunner
 )
 
-# TODO:: this kind of function should be a utility available to all demo files
 def create_agent(llm, tools, role_description):
     """
     A helper factory function to simplify the creation of worker agents.
