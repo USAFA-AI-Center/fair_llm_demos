@@ -1,6 +1,4 @@
 # demo_multi_agent.py
-import asyncio
-
 """
 This script serves as a hands-on tutorial and demonstration of the framework's
 most advanced feature: Hierarchical Multi-Agent Collaboration.
@@ -16,6 +14,7 @@ information gathering (research) and mathematical computation (analysis). No sin
 agent can solve this alone, but by collaborating, the team can deliver a
 comprehensive solution.
 """
+import asyncio
 
 # --- Step 1: Import all necessary components ---
 from fairlib import (
@@ -101,11 +100,11 @@ async def main():
     # --- Step 4: Create the Manager Agent ---
     # The manager is a special type of agent. It doesn't have regular tools.
     # Instead, its "tool" is the ability to delegate tasks to its workers.
-    # We equip it with the special `ManagerPlanner`.
+    # We equip it with the special ManagerPlanner.
     manager_memory = WorkingMemory()
     manager_planner = ManagerPlanner(llm, workers)
     
-    # Note: The manager's ToolExecutor is `None` because it should never execute
+    # Note: The manager's ToolExecutor is None because it should never execute
     # a tool directly. Its planner will only produce 'delegate' or 'final_answer' actions.
     manager_agent = SimpleAgent(llm, manager_planner, None, manager_memory) 
 
@@ -120,7 +119,7 @@ async def main():
     user_query = "My budget is $5,000. Please find the current price of Bitcoin and then calculate exactly how many Bitcoins I can afford to buy."
     
     # --- Step 7: Run the Agent Team ---
-    # We call the `arun` method on the runner, which kicks off the entire
+    # We call the arun method on the runner, which kicks off the entire
     # collaborative process. The runner will print the internal thoughts
     # and actions of the agents as it works.
     final_answer = await team_runner.arun(user_query)

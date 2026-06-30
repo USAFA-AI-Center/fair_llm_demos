@@ -1,12 +1,11 @@
 # demo_model_comparison.py
-import asyncio
-from typing import Dict
-
 """
 This module provides a tutorial on comparing the outputs of different Large
 Language Models (LLMs) for the same task, showcasing the power of the framework's
 Model Abstraction Layer (MAL).
 """
+import asyncio
+from typing import Dict
 
 # --- Step 1: Import all necessary components ---
 from fairlib import (
@@ -42,7 +41,7 @@ async def main():
     # --- Step 3: Dynamically Initialize LLMs from Settings ---
     # This section demonstrates the plug-and-play nature of the MAL.
     # We will try to initialize every model the user has configured
-    # in their `settings.yml` file.
+    # in their settings.yml file.
     print("Initializing configured models from settings...")
     
     models: Dict[str, AbstractChatModel] = {}
@@ -80,7 +79,7 @@ async def main():
     print(f"\n--- Giving all agents the same prompt: ---\n'{prompt}'\n")
 
     # --- Step 6: Run All Agents in Parallel ---
-    # `asyncio.gather` is a an efficient way to run multiple async tasks concurrently.
+    # asyncio.gather is a an efficient way to run multiple async tasks concurrently.
     tasks = [agent.arun(prompt) for agent in agents.values()]
     responses = await asyncio.gather(*tasks)
     
@@ -97,5 +96,5 @@ async def main():
 
 if __name__ == "__main__":
     # To get the most out of this demo, ensure you have API keys for
-    # both OpenAI and Anthropic in your `config/settings.yml` file.
+    # both OpenAI and Anthropic in your config/settings.yml file.
     asyncio.run(main())

@@ -1,88 +1,78 @@
 # demo_committee_of_agents_coding_autograder.py
 """
-================================================================================
-        Multi-Agent AI Programming Assignment Autograder
-================================================================================
+Multi-Agent AI Programming Assignment Autograder
 
-**Purpose:**
+Purpose:
 This script provides a framework for auto-grading student programming assignments.
 It evaluates submissions based on correctness (by running unit tests), code
 quality, style, and the logical soundness of the implemented solution.
 
-**Who is this for?**
+Who is this for?
 This tool is designed for computer science instructors and TAs who need to
 grade programming assignments and want an AI-assisted workflow to handle the
 repetitive aspects of code review, such as running tests and checking for
 style, while also getting a high-level analysis of the student's approach.
 
---------------------------------------------------------------------------------
+CRITICAL SECURITY WARNING: CODE EXECUTION
+This tool includes a CodeRunner agent that executes student-submitted code
+to run unit tests. Executing untrusted code from any source is EXTREMELY
+DANGEROUS and poses a significant security risk.
 
-**CRITICAL SECURITY WARNING: CODE EXECUTION**
-This tool includes a `CodeRunner` agent that executes student-submitted code
-to run unit tests. Executing untrusted code from any source is **EXTREMELY
-DANGEROUS** and poses a significant security risk.
-
-The `sandbox_code_execution` function in this demo script is a **NON-SECURE
-PLACEHOLDER**. It uses a simple Python subprocess, which **DOES NOT** provide
-adequate isolation. For any real-world application, this function **MUST** be
+The sandbox_code_execution function in this demo script is a NON-SECURE
+PLACEHOLDER. It uses a simple Python subprocess, which DOES NOT provide
+adequate isolation. For any real-world application, this function MUST be
 replaced with a robust, secure sandboxing technology like:
-  - **Docker Containers:** Running each submission in an isolated container.
-  - **gVisor or Firecracker:** Providing a secure kernel-level sandbox.
-  - **A dedicated, secure third-party code execution service.**
+  - Docker Containers: Running each submission in an isolated container.
+  - gVisor or Firecracker: Providing a secure kernel-level sandbox.
+  - A dedicated, secure third-party code execution service.
 
-**DO NOT RUN THIS SCRIPT IN A PRODUCTION ENVIRONMENT WITHOUT A PROPER SANDBOX.**
+DO NOT RUN THIS SCRIPT IN A PRODUCTION ENVIRONMENT WITHOUT A PROPER SANDBOX.
 
---------------------------------------------------------------------------------
+How It Works: A Code Review Committee of AI Agents
 
-**How It Works: A "Code Review Committee" of AI Agents**
+1. GradingManager (The Senior Developer/Tech Lead):
+   - Orchestrates the entire code review process for each submission.
+   - Delegates specific analysis tasks to its specialized team members.
 
-1.  **GradingManager (The Senior Developer/Tech Lead):**
-    -   Orchestrates the entire code review process for each submission.
-    -   Delegates specific analysis tasks to its specialized team members.
+2. CodeRunner (The QA Engineer) - OPTIONAL:
+   - If enabled, this agent runs the student's code against unit tests.
+   - This is the most critical agent for correctness, but it can be disabled
+     for assignments where only static analysis is needed.
 
-2.  **CodeRunner (The QA Engineer) - OPTIONAL:**
-    -   If enabled, this agent runs the student's code against unit tests.
-    -   This is the most critical agent for correctness, but it can be disabled
-        for assignments where only static analysis is needed.
+3. StaticAnalyzer (The Linter and Style Cop):
+   - Reviews the code without running it. It checks for style guides
+     (e.g., PEP 8), complexity, and comment quality.
 
-3.  **StaticAnalyzer (The Linter & Style Cop):**
-    -   Reviews the code without running it. It checks for style guides
-        (e.g., PEP 8), complexity, and comment quality.
+4. LogicAndEfficiency (The Principal Architect):
+   - Performs a conceptual review of the student's approach. Is the
+     algorithm efficient? Is the logic sound?
 
-4.  **LogicAndEfficiency (The Principal Architect):**
-    -   Performs a conceptual review of the student's approach. Is the
-        algorithm efficient? Is the logic sound?
+5. RubricAligner (The TA):
+   - Synthesizes all reports to fill out a structured JSON grade, ensuring
+     every rubric criterion is scored with a clear justification.
 
-5.  **RubricAligner (The TA):**
-    -   Synthesizes all reports to fill out a structured JSON grade, ensuring
-        every rubric criterion is scored with a clear justification.
+How to Use This Tool
 
---------------------------------------------------------------------------------
+Step 1: Prepare Your Folders
+  - submissions/: Place all student code files (e.g., student1.py) here.
+  - tests/ (Optional): Place the unit test file here if you plan to run tests.
+  - reports/: This is where the output grade reports will be saved.
 
-**How to Use This Tool**
-
-**Step 1: Prepare Your Folders**
-  - `submissions/`: Place all student code files (e.g., `student1.py`) here.
-  - `tests/` (Optional): Place the unit test file here if you plan to run tests.
-  - `reports/`: This is where the output grade reports will be saved.
-
-**Step 2: Write Unit Tests**
-Create a Python file with `pytest`-compatible unit tests. This file will be
+Step 2: Write Unit Tests
+Create a Python file with pytest-compatible unit tests. This file will be
 used to evaluate all submissions for the assignment.
 
-**Step 3: Run from the Terminal**
+Step 3: Run from the Terminal
 
-**To run WITH test execution:**
-```bash
-python demo_programming_autograder.py --submissions submissions/ --tests tests/test_assignment1.py --rubric rubric.txt --output reports/
-```
+To run WITH test execution:
 
-**To run WITHOUT test execution (static analysis only):**
-```bash
-python demo_programming_autograder.py --submissions submissions/ --rubric rubric.txt --output reports/ --no-run
-```
-Note: The `--tests` argument is not needed when using `--no-run`.
-================================================================================
+    python demo_programming_autograder.py --submissions submissions/ --tests tests/test_assignment1.py --rubric rubric.txt --output reports/
+
+To run WITHOUT test execution (static analysis only):
+
+    python demo_programming_autograder.py --submissions submissions/ --rubric rubric.txt --output reports/ --no-run
+
+Note: The --tests argument is not needed when using --no-run.
 """
 import asyncio
 import logging
@@ -90,7 +80,7 @@ import argparse
 from pathlib import Path
 import json
 
-# --- Step 1: Import from the new fairlib.utils.module and the central fairlib API ---
+# Step 1: Import from the new fairlib.utils module and the central fairlib API
 from fairlib.utils.autograder_utils import (
     create_agent, format_report
 )
@@ -102,7 +92,7 @@ from fairlib import (
 
 logger = logging.getLogger(__name__)
 
-# --- Step 2: Main Code Grading Orchestration ---
+# Step 2: Main Code Grading Orchestration
 async def grade_single_submission(submission_doc, test_code, rubric, run_tests: bool):
     """
     Orchestrates the multi-agent grading process for a single code submission.
@@ -113,7 +103,7 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
 
     llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
 
-    # --- Define the "Code Review Committee" ---
+    # Define the Code Review Committee.
     # Agents are created dynamically based on whether execution is needed.
     static_analyzer = create_agent(llm, "A senior developer. Analyze the code for style, clarity, comments, and complexity. Do not run it.")
     logic_reviewer = create_agent(llm, "A principal software architect. Review the code for its algorithmic approach, logic, and efficiency.")
@@ -129,7 +119,7 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
     if run_tests:
         workers["CodeRunner"] = create_agent(llm, "A QA Engineer. Use the 'run_code_with_tests' tool.", [CodeExecutionTool()])
     
-    # --- Create the Manager agent directly, not with the worker factory ---
+    # Create the Manager agent directly, not with the worker factory.
     # The manager's role is to plan and delegate, not execute tools, so its
     # tool_executor should be None.
     manager_memory = WorkingMemory()
@@ -144,8 +134,8 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
     manager_agent.role_description = "The lead developer managing the code review."
 
     team_runner = HierarchicalAgentRunner(manager_agent, workers, max_steps=8)
-    
-    # --- Dynamically construct the manager's prompt ---
+
+    # Dynamically construct the manager's prompt.
     # The workflow instructions change based on whether the CodeRunner is active.
     workflow_steps = ["Delegate to `StaticAnalyzer` and `LogicAndEfficiency` for their reviews."]
     if run_tests:

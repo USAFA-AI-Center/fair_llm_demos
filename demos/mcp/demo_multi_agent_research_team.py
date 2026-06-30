@@ -60,50 +60,50 @@ from typing import Optional
 # ==============================================================================
 # SECTION 1: THE FAIRLIB IMPORT CATALOG
 # ==============================================================================
-# Everything below can be imported directly from `fairlib`. This single import
+# Everything below can be imported directly from fairlib. This single import
 # point is powered by lazy-loading (see fairlib/__init__.py)
 #
 # We organize them here by category so you can see the full toolkit at a glance.
 
 # --- 1a. Configuration ---
-# `settings` is a validated Pydantic object loaded from fairlib/config/settings.yml.
+# settings is a validated Pydantic object loaded from fairlib/config/settings.yml.
 # It gives you access to API keys, model configs, search engine settings, etc.
 from fairlib import settings
 
 # --- 1b. Core Data Types ---
 # These are the fundamental data structures that flow through every component.
-# `Message` is the universal currency of communication between agents and LLMs.
-# `Thought`, `Action`, `Observation`, `FinalAnswer` are the ReAct loop primitives.
-# `Document` is used in RAG pipelines for chunked text with metadata.
+# Message is the universal currency of communication between agents and LLMs.
+# Thought, Action, Observation, FinalAnswer are the ReAct loop primitives.
+# Document is used in RAG pipelines for chunked text with metadata.
 
 # --- 1c. Prompt Engineering ---
 # The PromptBuilder system lets you construct structured prompts from composable
-# pieces. Each piece is a `PromptItem` subclass that renders to a string.
+# pieces. Each piece is a PromptItem subclass that renders to a string.
 from fairlib import (
     AgentCapability,        # Structured description of what an agent can do
 )
 
 # --- 1d. Agent Classes ---
-# `SimpleAgent` is the core ReAct agent that thinks, acts, and observes in a loop.
-# `HierarchicalAgentRunner` orchestrates a manager + multiple worker agents.
+# SimpleAgent is the core ReAct agent that thinks, acts, and observes in a loop.
+# HierarchicalAgentRunner orchestrates a manager + multiple worker agents.
 from fairlib import SimpleAgent, HierarchicalAgentRunner
 
 # --- 1e. Planners ---
 # Planners are the "brain" — they take history and produce the next Thought+Action.
-# `ReActPlanner`       - Standard planner using JSON format (for capable models)
-# `SimpleReActPlanner` - Lightweight planner using text key-value format (for small models)
-# `ManagerPlanner`     - Specialized planner that only delegates or gives final answers
+# ReActPlanner       - Standard planner using JSON format (for capable models)
+# SimpleReActPlanner - Lightweight planner using text key-value format (for small models)
+# ManagerPlanner     - Specialized planner that only delegates or gives final answers
 from fairlib import ReActPlanner, SimpleReActPlanner, ManagerPlanner
 
 # --- 1f. Memory ---
 # Memory systems store conversation history and retrieved context.
-# `WorkingMemory` is short-term, in-context memory (most common for demos).
-# `LongTermMemory` is RAG-backed memory using a vector store + retriever.
+# WorkingMemory is short-term, in-context memory (most common for demos).
+# LongTermMemory is RAG-backed memory using a vector store + retriever.
 from fairlib import WorkingMemory
 
 # --- 1g. Model Abstraction Layer (MAL) ---
 # The MAL lets you swap LLM providers without changing any agent code.
-# Each adapter conforms to the same `AbstractChatModel` interface.
+# Each adapter conforms to the same AbstractChatModel interface.
 #   OpenAIAdapter      - GPT-4, GPT-3.5, etc.
 #   AnthropicAdapter   - Claude 3, Claude 3.5, etc.
 #   HuggingFaceAdapter - Local transformer models (v4 AND v5 compatible)
@@ -113,8 +113,8 @@ from fairlib import HuggingFaceAdapter
 
 # --- 1h. Tool Components ---
 # Tools give agents the ability to interact with the world.
-# `ToolRegistry` holds a collection of tools.
-# `ToolExecutor` runs tools by name and returns results.
+# ToolRegistry holds a collection of tools.
+# ToolExecutor runs tools by name and returns results.
 from fairlib import ToolRegistry, ToolExecutor
 
 # --- 1i. Built-in Tools ---
