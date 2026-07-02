@@ -22,6 +22,7 @@ from fairlib.modules.mal.huggingface_adapter import (
     MODEL_REGISTRY,
     TRANSFORMERS_V5,
 )
+from fairlib.core.errors import DegradedResponse
 from fairlib.core.message import Message
 
 
@@ -109,10 +110,15 @@ async def main():
     print(f"  Assistant: {async_response.content}\n")
 
     # --- Step 7: stream() — synchronous streaming ---
+    # Streams raise DegradedResponse on provider failure instead of
+    # yielding an error-text chunk, so wrap iteration when rendering.
     print("=== stream() — Synchronous Streaming ===")
     print("  Assistant: ", end="", flush=True)
-    for chunk in llm.stream([Message(role="user", content="Count from 1 to 5.")]):
-        print(chunk.content, end="", flush=True)
+    try:
+        for chunk in llm.stream([Message(role="user", content="Count from 1 to 5.")]):
+            print(chunk.content, end="", flush=True)
+    except DegradedResponse as exc:
+        print(f"\n  [stream degraded: {exc.kind.value}]")
     print("\n")
 
     # --- Step 8: chat() — convenience method (returns string) ---

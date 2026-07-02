@@ -22,6 +22,7 @@ from fairlib.modules.mal.huggingface_adapter import (
     HuggingFaceAdapter,
     TRANSFORMERS_V5,
 )
+from fairlib.core.errors import DegradedResponse
 from fairlib.core.message import Message
 
 
@@ -115,13 +116,18 @@ async def main():
 
     # --- Step 8: stream() — synchronous streaming ---
     # Uses TextIteratorStreamer + Thread (works on both v4 and v5).
+    # Streams raise DegradedResponse on provider failure instead of
+    # yielding an error-text chunk, so wrap iteration when rendering.
     print("=== stream() — Synchronous Streaming ===")
     print("  Assistant: ", end="", flush=True)
-    for chunk in llm.stream(
-        [Message(role="user", content="Count from 1 to 5.")],
-        max_new_tokens=64,
-    ):
-        print(chunk.content, end="", flush=True)
+    try:
+        for chunk in llm.stream(
+            [Message(role="user", content="Count from 1 to 5.")],
+            max_new_tokens=64,
+        ):
+            print(chunk.content, end="", flush=True)
+    except DegradedResponse as exc:
+        print(f"\n  [stream degraded: {exc.kind.value}]")
     print("\n")
 
     # --- Step 9: astream() — async streaming ---
@@ -133,11 +139,14 @@ async def main():
     else:
         print("  (v4: falling back to ainvoke)")
     print("  Assistant: ", end="", flush=True)
-    async for chunk in llm.astream(
-        [Message(role="user", content="Write a short greeting.")],
-        max_new_tokens=64,
-    ):
-        print(chunk.content, end="", flush=True)
+    try:
+        async for chunk in llm.astream(
+            [Message(role="user", content="Write a short greeting.")],
+            max_new_tokens=64,
+        ):
+            print(chunk.content, end="", flush=True)
+    except DegradedResponse as exc:
+        print(f"\n  [stream degraded: {exc.kind.value}]")
     print("\n")
 
     # --- Step 10: chat() — convenience method ---
