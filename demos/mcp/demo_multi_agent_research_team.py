@@ -1,8 +1,6 @@
 # demo_multi_agent_research_team_showcase.py
 """
-================================================================================
-     FAIR-LLM Showcase: Multi-Agent Research Team (with MCP Integration)
-================================================================================
+FAIR-LLM Showcase: Multi-Agent Research Team (with MCP Integration).
 
 PURPOSE:
     This demo is a TEACHING TOOL designed to walk students through every major
@@ -11,31 +9,54 @@ PURPOSE:
     By the end of this demo, you will understand how to:
     - Build custom prompts with the PromptBuilder system
     - Create specialized worker agents with focused tool sets
-    - Orchestrate a hierarchical manager-worker team
+    - Wrap worker agents as typed tools with WorkerAgentTool
+    - Assemble a fan-out manager with build_worker_manager
+    - Observe delegation through the typed event bus
     - Connect to external MCP servers for tool interoperability
     - Use someone ELSE's tools (like Brave Search) through MCP
 
 THE RESEARCH TEAM:
-==================
-    Manager  (coordinates the effort, delegates sub-tasks)
-       |
-       +---> Researcher  (web search via MCP / Google CSE fallback)
-       +---> Analyst     (mathematical calculations)
-       +---> Writer      (synthesizes findings into a report, no tools)
+    Manager (a plain SimpleAgent whose tools ARE the workers)
+       delegates to:
+       Researcher  (web search via MCP / Google CSE fallback)
+       Analyst     (mathematical calculations)
+       Writer      (synthesizes findings into a report, no tools)
 
-MCP VALUE PROPOSITION:
-======================
-    The Researcher agent does NOT implement its own web search. Instead, it
-    connects to someone else's Brave Search MCP server running in a Docker
-    container. This demonstrates INTEROPERABILITY: you can leverage any
-    MCP-compatible tool without writing a single line of integration code.
+    The manager is not a special orchestrator class. Each worker is an
+    ordinary stateless SimpleAgent wrapped in a WorkerAgentTool, and the
+    manager is a plain SimpleAgent built by build_worker_manager over those
+    worker tools. The manager's model reads what each worker is for from
+    the rendered tool catalog (the WorkerAgentTool descriptions), so
+    delegating a subtask is an ordinary typed tool call. Because all three
+    workers here are declared SideEffect.READ_ONLY, independent
+    delegations issued in one turn are dispatched concurrently by the
+    side-effect-aware executor; dependent subtasks (search, then compute
+    on the result, then write it up) still chain naturally across turns.
 
-    If Brave Search is unavailable, the demo gracefully falls back to the
-    built-in WebSearcherTool (Google CSE). If neither is available, only the
-    Analyst and Writer workers will be active.
+What it shows:
+  - WorkerAgentTool adapts any BaseAgent into a typed tool; the tool
+    description is what the manager model reads, and the declared
+    SideEffect (READ_ONLY here) is what permits concurrent fan-out.
+  - build_worker_manager is pure wiring: MultiActionReActPlanner plus
+    ToolExecutor over a registry of worker tools, one shared event bus,
+    returning an ordinary SimpleAgent.
+  - Workers are ordinary stateless SimpleAgents with their own planners
+    and tools - the same agents you would build standalone.
+  - Instrumentation rides the shared AgentEventBus: the scheduler's
+    grouping decision (ToolBatchScheduledEvent) and per-delegation timing
+    (ToolCallPreEvent/ToolCallPostEvent, keyed by (step, call_index)).
+  - MCP interoperability: the Researcher does NOT implement its own web
+    search; it connects to someone else's Brave Search MCP server. If
+    Brave Search is unavailable, the demo gracefully falls back to the
+    built-in WebSearcherTool (Google CSE); if neither is available, only
+    the Analyst and Writer workers have tools.
+
+A note on stochasticity: a real local model drives the manager and every
+worker. Delegation quality and whether independent subtasks fan out in a
+single turn depend on the model's output on a given run; the run completes
+either way.
 
 PREREQUISITES:
-==============
     Optional (for MCP web search):
         pip install mcp
         docker run -d -p 8080:8080 \\
@@ -48,14 +69,13 @@ PREREQUISITES:
         fairlib/config/settings.yml
 
 RUN:
-    python demos/demo_multi_agent_research_team_showcase.py
-
-================================================================================
+    python demos/mcp/demo_multi_agent_research_team.py
 """
 import asyncio
 import os
 import sys
-from typing import Optional
+import time
+from typing import Dict, List, Optional, Tuple
 
 # ==============================================================================
 # SECTION 1: THE FAIRLIB IMPORT CATALOG
@@ -79,21 +99,24 @@ from fairlib import settings
 # --- 1c. Prompt Engineering ---
 # The PromptBuilder system lets you construct structured prompts from composable
 # pieces. Each piece is a PromptItem subclass that renders to a string.
-from fairlib import (
-    AgentCapability,        # Structured description of what an agent can do
-)
+# RoleDefinition states who the agent is; the planner merges its own mandatory
+# format instructions on top, so application prompt content stays declarative.
+from fairlib import PromptBuilder, RoleDefinition
 
 # --- 1d. Agent Classes ---
 # SimpleAgent is the core ReAct agent that thinks, acts, and observes in a loop.
-# HierarchicalAgentRunner orchestrates a manager + multiple worker agents.
-from fairlib import SimpleAgent, HierarchicalAgentRunner
+# WorkerAgentTool wraps any agent as a typed tool a manager can call.
+# build_worker_manager wires a fan-out manager as a plain SimpleAgent whose
+# tools are the workers.
+from fairlib import SimpleAgent, WorkerAgentTool, build_worker_manager
 
 # --- 1e. Planners ---
 # Planners are the "brain" — they take history and produce the next Thought+Action.
 # ReActPlanner       - Standard planner using JSON format (for capable models)
 # SimpleReActPlanner - Lightweight planner using text key-value format (for small models)
-# ManagerPlanner     - Specialized planner that only delegates or gives final answers
-from fairlib import ReActPlanner, SimpleReActPlanner, ManagerPlanner
+# The manager's batch-capable MultiActionReActPlanner is constructed for us
+# inside build_worker_manager; we never instantiate it here.
+from fairlib import ReActPlanner, SimpleReActPlanner
 
 # --- 1f. Memory ---
 # Memory systems store conversation history and retrieved context.
@@ -141,14 +164,24 @@ from fairlib import SafeCalculatorTool, WebSearcherTool
 #   CompositeToolRegistry - Merges local tools + MCP tools into one registry
 from fairlib import MCPServerConfig, CompositeToolRegistry
 
-# --- 1k. Advanced Prompt Components (imported from sub-module) ---
-# These are specialized prompt items for manager agents.
-from fairlib.core.prompts import (
-    ManagerPromptBuilder,       # Builder optimized for manager delegation prompts
-    StrictFormatInstruction,    # Explicit DO/DON'T rules for smaller models
-    DelegationExample,          # Single-turn delegation example for few-shot
-    EnhancedWorkerInstruction,  # Rich worker descriptions with capability details
+# --- 1k. Observability ---
+# Every step of the manager's loop emits typed events on a shared bus.
+# Subscribing is how consumers observe the system; nothing is inferred by
+# string-matching output.
+from fairlib import AgentEventBus
+from fairlib.core.events import (
+    ToolBatchScheduledEvent,
+    ToolCallPostEvent,
+    ToolCallPreEvent,
 )
+
+# --- 1l. Tool Contract Types ---
+# SideEffect is each tool's dispatch classification. For worker tools it is
+# the author's assertion about the wrapped agent: READ_ONLY delegations may
+# run concurrently within a turn; the conservative default EXTERNAL is a
+# sequential barrier.
+from fairlib.core.interfaces.tools import SideEffect
+from fairlib.core.message import OBSERVATION_PREFIX
 
 
 # ==============================================================================
@@ -209,7 +242,6 @@ async def setup_brave_search_mcp(url: Optional[str] = None):
 def create_worker_agent(
     llm,
     tools,
-    role_description: str,
     use_simple_planner: bool = False,
     mcp_registry=None,
     max_steps: int = 5,
@@ -225,10 +257,15 @@ def create_worker_agent(
         5. Create WorkingMemory
         6. Assemble into a SimpleAgent
 
+    Nothing here is manager-specific: this is the same construction a
+    standalone agent uses. A worker only becomes delegable when it is
+    wrapped in a WorkerAgentTool (Section 3, Step 3), and the manager
+    learns what the worker is for from that wrapper's description, not
+    from anything on the agent itself.
+
     Args:
         llm:                The language model adapter (any MAL adapter works)
         tools:              List of local tool instances
-        role_description:   What this agent does (shown to the manager)
         use_simple_planner: If True, use SimpleReActPlanner (better for small models)
         mcp_registry:       Optional MCPToolRegistry to merge with local tools
         max_steps:          Max reasoning steps before the agent gives up
@@ -257,16 +294,67 @@ def create_worker_agent(
     memory = WorkingMemory()
 
     # Step 6: Assemble the agent
-    agent = SimpleAgent(
+    return SimpleAgent(
         llm=llm,
         planner=planner,
         tool_executor=executor,
         memory=memory,
         max_steps=max_steps,
-        stateless=True,  # Workers clear memory between tasks
+        stateless=True,  # Workers clear memory between delegations
     )
-    agent.role_description = role_description
-    return agent
+
+
+# ==============================================================================
+# SECTION 2b: EVENT-BUS INSTRUMENTATION
+# ==============================================================================
+# The manager and its executor share one AgentEventBus. Subscribing to the
+# typed events is the supported way to watch delegation happen:
+#   ToolBatchScheduledEvent - how the executor grouped a turn's delegations
+#                             (READ_ONLY groups run in parallel; barriers
+#                             run alone)
+#   ToolCallPreEvent        - a delegation is starting
+#   ToolCallPostEvent       - a delegation finished, with its observation
+# Pre/Post events for the same call share (step, call_index): step is the
+# manager's loop step and call_index is the call's position within the
+# turn. That pair is the correlation key - two delegations in one turn can
+# target the SAME worker tool, so keying by tool name would collide.
+
+class DelegationReporter:
+    """Bus subscriber narrating the manager's fan-out as it happens.
+
+    A class because it carries state: per-call start times keyed by
+    (step, call_index) - a turn may delegate to the same worker twice, so
+    keying by tool name would collide - and the finished-delegation log
+    the demo prints at the end.
+    """
+
+    def __init__(self) -> None:
+        self.starts: Dict[Tuple[Optional[int], int], float] = {}
+        self.log: List[str] = []
+
+    def on_batch_scheduled(self, event: ToolBatchScheduledEvent) -> None:
+        print(f"\n  [scheduler] step {event.step}: "
+              f"{event.batch_size} delegation(s) this turn:")
+        for i, group in enumerate(event.groups, start=1):
+            how = "PARALLEL" if group.parallel else "sequential"
+            print(f"    group {i}: {how:10} [{group.side_effect.value}] "
+                  f"{', '.join(group.tool_names)}")
+
+    def on_delegation_start(self, event: ToolCallPreEvent) -> None:
+        self.starts[(event.step, event.call_index)] = time.perf_counter()
+        print(f"  [delegate] step {event.step} call {event.call_index}: "
+              f"-> {event.tool_name}")
+
+    def on_delegation_done(self, event: ToolCallPostEvent) -> None:
+        started = self.starts.pop((event.step, event.call_index), None)
+        duration = time.perf_counter() - started if started is not None else 0.0
+        snippet = event.observation[:90].replace("\n", " ")
+        self.log.append(
+            f"step {event.step} call {event.call_index} {event.tool_name}: "
+            f"{duration:.1f}s ok={event.succeeded}"
+        )
+        print(f"  [result]   step {event.step} call {event.call_index}: "
+              f"{event.tool_name} in {duration:.1f}s -> {snippet}")
 
 
 # ==============================================================================
@@ -275,15 +363,16 @@ def create_worker_agent(
 
 async def build_research_team(llm):
     """
-    Construct a 3-worker research team with a manager coordinator.
+    Construct a 3-worker research team behind a fan-out manager.
 
     This function demonstrates:
     - Creating agents with different tool configurations
     - MCP integration for external web search
     - Graceful fallback when MCP is unavailable
-    - ManagerPlanner with custom PromptBuilder
-    - AgentCapability for structured worker descriptions
-    - HierarchicalAgentRunner for orchestration
+    - WorkerAgentTool wrapping (descriptions + SideEffect declarations)
+    - PromptBuilder role content for the manager
+    - Event-bus instrumentation of delegation
+    - build_worker_manager assembling the manager as a plain SimpleAgent
     """
     print_section("BUILDING THE RESEARCH TEAM")
 
@@ -327,275 +416,161 @@ async def build_research_team(llm):
     print(f"    Search source: {search_source}")
 
     # ------------------------------------------------------------------
-    # Step 2: Define AgentCapability for each worker
+    # Step 2: Create the worker agents
     # ------------------------------------------------------------------
-    # AgentCapability provides a STRUCTURED way to describe what each worker
-    # can do. This is used to generate rich worker instructions for the
-    # manager's prompt and can also be used for automatic agent selection.
-    print_step(2, "Defining agent capabilities (AgentCapability)")
-
-    researcher_capability = AgentCapability(
-        name="Researcher",
-        primary_function="Searches the web to find current, real-time information.",
-        capabilities=[
-            "Find current prices, statistics, and data",
-            "Look up recent news and developments",
-            "Discover facts and background information",
-        ],
-        limitations=[
-            "Cannot perform calculations",
-            "Cannot write long-form content",
-        ],
-        input_format="A clear search query or research question",
-        output_format="Raw search results and key findings",
-        example_tasks=[
-            "Find the current price of Bitcoin",
-            "What are the latest trends in AI agents?",
-        ],
-        delegation_keywords=["search", "find", "look up", "research", "current"],
-        tools=["web_search"],
-    )
-
-    analyst_capability = AgentCapability(
-        name="Analyst",
-        primary_function="Performs mathematical calculations and data analysis.",
-        capabilities=[
-            "Arithmetic operations (add, subtract, multiply, divide)",
-            "Percentage calculations",
-            "Unit conversions",
-        ],
-        limitations=[
-            "Cannot search the web",
-            "Cannot write reports",
-        ],
-        input_format="A mathematical expression or calculation request",
-        output_format="Numerical result with explanation",
-        example_tasks=[
-            "Calculate 5000 / 67432.50",
-            "What is 15% of 250?",
-        ],
-        delegation_keywords=["calculate", "compute", "math", "how many", "percentage"],
-        tools=["safe_calculator"],
-    )
-
-    writer_capability = AgentCapability(
-        name="Writer",
-        primary_function="Synthesizes information into clear, well-organized reports.",
-        capabilities=[
-            "Summarize complex information",
-            "Write structured reports with sections",
-            "Combine findings from multiple sources",
-        ],
-        limitations=[
-            "Cannot search the web",
-            "Cannot perform calculations",
-            "Has NO tools — relies entirely on the LLM",
-        ],
-        input_format="Raw findings and data to synthesize",
-        output_format="A clear, organized written summary or report",
-        example_tasks=[
-            "Summarize the research findings into a brief report",
-            "Write a comparison of two datasets",
-        ],
-        delegation_keywords=["summarize", "write", "report", "synthesize", "explain"],
-        tools=[],
-    )
-
-    # Print the detailed capability descriptions
-    for cap in [researcher_capability, analyst_capability, writer_capability]:
-        print(f"\n    {cap.to_detailed_description()[:80]}...")
-
-    # ------------------------------------------------------------------
-    # Step 3: Create the worker agents
-    # ------------------------------------------------------------------
-    print_step(3, "Creating specialized worker agents")
+    # Each worker is an ordinary stateless SimpleAgent with its own planner
+    # and tools - exactly the agent you would build standalone. Nothing
+    # about a worker is team-specific yet.
+    print_step(2, "Creating specialized worker agents")
 
     # RESEARCHER: Uses MCP web search OR local Google CSE
     researcher = create_worker_agent(
         llm,
         researcher_tools,
-        role_description=(
-            "A web research specialist. Search the web ONCE, then immediately "
-            "return the results as your final answer. Do NOT search multiple times. "
-            "One search is enough — return what you find."
-        ),
         mcp_registry=researcher_mcp,
         max_steps=3,
     )
-    researcher.capability = researcher_capability
     print(f"    Researcher agent ready [{search_source}]")
 
     # ANALYST: Uses SafeCalculatorTool for math
     analyst = create_worker_agent(
         llm,
         [SafeCalculatorTool()],
-        role_description=(
-            "A mathematical analyst. You have ONLY one tool: safe_calculator. "
-            "Use it to evaluate math expressions. Do NOT try to use any other tool. "
-            "If given a number to calculate, pass the expression to safe_calculator "
-            "and return the result as your final answer."
-        ),
         max_steps=3,
     )
-    analyst.capability = analyst_capability
     print("    Analyst agent ready [SafeCalculatorTool]")
 
     # WRITER: No tools — relies on the LLM's own writing ability
     writer = create_worker_agent(
         llm,
         [],  # No tools!
-        role_description=(
-            "A writing specialist. You have NO tools available. "
-            "Your job is to take information given to you and write a clear, "
-            "organized summary or report. Just write your response directly "
-            "as the final answer — do NOT try to use any tools."
-        ),
     )
-    writer.capability = writer_capability
     print("    Writer agent ready [no tools, LLM only]")
 
     # ------------------------------------------------------------------
-    # Step 4: Build a custom ManagerPromptBuilder
+    # Step 3: Wrap each worker as a typed tool (WorkerAgentTool)
     # ------------------------------------------------------------------
-    # The ManagerPromptBuilder is a specialized PromptBuilder that adds
-    # strict formatting rules for smaller models. It ensures the manager
-    # only outputs "delegate" or "final_answer" actions.
-    print_step(4, "Building the manager's prompt (ManagerPromptBuilder)")
-
-    workers = {
-        "Researcher": researcher,
-        "Analyst": analyst,
-        "Writer": writer,
-    }
-
-    # We use strict_mode=False so we can add StrictFormatInstruction items
-    # MANUALLY below. With strict_mode=True, the builder adds them automatically
-    # behind the scenes — but we want students to see every class in action.
-    manager_builder = ManagerPromptBuilder(strict_mode=False)
-    manager_builder.set_role(
-        "You are the manager of a research team. Your job is to break down "
-        "complex user requests into sub-tasks and delegate them to the right "
-        "worker. You do NOT perform tasks yourself — you coordinate the team. "
-        "Always delegate research tasks to the Researcher, math tasks to the "
-        "Analyst, and writing/summary tasks to the Writer."
-    )
-    manager_builder.set_workflow(["Researcher", "Analyst", "Writer"])
-
-    # Add enhanced worker instructions from capabilities
-    for cap in [researcher_capability, analyst_capability, writer_capability]:
-        manager_builder.worker_instructions.append(
-            EnhancedWorkerInstruction(cap)
-        )
-
-    # --- StrictFormatInstruction ---
-    # These provide explicit DO/DON'T formatting rules that help smaller models
-    # (3B-7B) produce correctly structured output. Each static method returns
-    # a pre-built instruction targeting a specific failure mode.
+    # This is the whole workers-as-tools trick. Each description below is
+    # what the manager's model reads in its rendered tool catalog, so write
+    # it the way you would brief a colleague on when to call this worker.
     #
-    #   .json_output_rules()        - "Output flat JSON, no code fences"
-    #   .delegation_rules(workers)  - "Only use delegate or final_answer"
-    #   .correct_format_example()   - "Correct vs incorrect format examples"
+    # SideEffect is the author's assertion about the wrapped agent:
+    # - The Researcher only retrieves (web search mutates nothing and
+    #   needs no ordering), the Analyst only computes, and the Writer only
+    #   generates text. All three are therefore declared READ_ONLY, which
+    #   is what allows independent delegations issued in one manager turn
+    #   to run concurrently.
+    # - A worker that mutated shared state (wrote files, posted to an API)
+    #   would keep the conservative default, EXTERNAL: a sequential
+    #   barrier, because overlapping mutations can interleave badly.
+    print_step(3, "Wrapping workers as typed tools (WorkerAgentTool)")
 
-    manager_builder.format_instructions.append(
-        StrictFormatInstruction.json_output_rules()
-    )
-    manager_builder.format_instructions.append(
-        StrictFormatInstruction.delegation_rules(["Researcher", "Analyst", "Writer"])
-    )
-    manager_builder.format_instructions.append(
-        StrictFormatInstruction.correct_format_example()
-    )
-    # Also add the workflow guidance (normally auto-added by strict_mode)
-    manager_builder.add_workflow_guidance()
-
-    # Add delegation examples using DelegationExample directly.
-    # DelegationExample is a subclass of Example that creates single-turn
-    # few-shot examples showing the manager how to delegate. Each example
-    # shows ONE decision point: a context, a thought, and an action.
-    #
-    # There are three static factory methods for common patterns:
-    #   .initial_delegation()   - First step: user request → delegate
-    #   .followup_delegation()  - Middle step: observation → delegate next
-    #   .final_answer_example() - Last step: observation → final answer
-
-    # Example 1: The manager receives the user request and delegates to Researcher
-    manager_builder.examples.append(
-        DelegationExample.initial_delegation(
-            user_request="Find the current price of gold and calculate how many ounces I can buy with $10,000",
-            thought="I need to find the price of gold first. The Researcher can search for this.",
-            worker_name="Researcher",
-            task="Find the current price of one ounce of gold in USD",
-        )
-    )
-
-    # Example 2: The manager receives the Researcher's result and delegates to Analyst
-    manager_builder.examples.append(
-        DelegationExample.followup_delegation(
-            observation="Result from Researcher: Gold is currently $2,350 per ounce.",
-            thought="Now I need the Analyst to calculate how many ounces $10,000 can buy.",
-            worker_name="Analyst",
-            task="Calculate 10000 / 2350",
-        )
-    )
-
-    # Example 3: The manager has all the information and provides the final answer
-    manager_builder.examples.append(
-        DelegationExample.final_answer_example(
-            observation="Result from Analyst: 10000 / 2350 = 4.2553",
-            thought="I have all the information. Let me provide the final answer.",
-            answer="Based on the current price of $2,350/oz, you can buy approximately 4.26 ounces of gold with $10,000.",
-        )
-    )
-
-    # Preview the built prompt (for educational purposes)
-    preview = manager_builder.build_system_prompt_string()
-    print(f"\n    Manager prompt preview ({len(preview)} chars):")
-    # Show first few lines
-    for line in preview.split("\n")[:6]:
-        print(f"      | {line}")
-    print("      | ...")
+    worker_tools = [
+        WorkerAgentTool(
+            researcher,
+            name="researcher",
+            description=(
+                "Delegate a web research subtask, phrased as a complete "
+                "question, to a research specialist that can search the web "
+                "for current prices, statistics, news, and facts. It cannot "
+                "do math and cannot write reports. It searches once and "
+                "returns what it finds."
+            ),
+            side_effect=SideEffect.READ_ONLY,
+        ),
+        WorkerAgentTool(
+            analyst,
+            name="analyst",
+            description=(
+                "Delegate a math subtask, phrased as a complete request with "
+                "the numbers included, to an analyst whose only tool is a "
+                "safe calculator. It evaluates arithmetic expressions, "
+                "percentages, and conversions. It cannot search the web and "
+                "cannot write reports."
+            ),
+            side_effect=SideEffect.READ_ONLY,
+        ),
+        WorkerAgentTool(
+            writer,
+            name="writer",
+            description=(
+                "Delegate a writing subtask, including ALL the findings and "
+                "numbers to use, to a writing specialist with no tools. It "
+                "synthesizes the material you give it into a clear, organized "
+                "summary or report. It cannot search and cannot calculate, so "
+                "the subtask text must contain everything it needs."
+            ),
+            side_effect=SideEffect.READ_ONLY,
+        ),
+    ]
+    for tool in worker_tools:
+        print(f"    {tool.name}: side_effect={tool.side_effect.value}")
 
     # ------------------------------------------------------------------
-    # Step 5: Create the Manager Agent with ManagerPlanner
+    # Step 4: Application prompt content for the manager (PromptBuilder)
     # ------------------------------------------------------------------
-    print_step(5, "Creating the Manager agent (ManagerPlanner)")
+    # fairlib ships no prompt content. The manager's planner auto-generates
+    # the tool catalog from the worker tools' schemas and descriptions and
+    # merges its own mandatory format instructions; the application only
+    # supplies role content. Compare this with Step 3: the per-worker
+    # guidance lives on the tools, not in a hand-written roster.
+    print_step(4, "Building the manager's role prompt (PromptBuilder)")
 
-    # The ManagerPlanner takes our custom builder and automatically merges
-    # mandatory format instructions (ensuring the parser always works).
-    manager_planner = ManagerPlanner(
-        llm=llm,
-        workers=workers,
-        prompt_builder=manager_builder,  # Our custom builder!
+    manager_builder = PromptBuilder()
+    manager_builder.role_definition = RoleDefinition(
+        "You are the manager of a research team. Break the user's request "
+        "into subtasks and delegate each one to the right worker tool. You "
+        "do NOT perform tasks yourself - you coordinate the team. Delegate "
+        "research to the researcher, math to the analyst, and writing to the "
+        "writer. When subtasks are independent of each other, delegate them "
+        "together in the same turn; when one subtask needs another's result, "
+        "wait for that result before delegating the next. When all subtasks "
+        "are done, combine the results into your final answer."
     )
-
-    manager_agent = SimpleAgent(
-        llm=llm,
-        planner=manager_planner,
-        tool_executor=None,  # Manager never executes tools directly
-        memory=WorkingMemory(),
-    )
-    print("    Manager agent ready [ManagerPlanner + custom prompt]")
+    print("    Manager role defined (tool catalog is auto-generated from")
+    print("    the WorkerAgentTool schemas and descriptions).")
 
     # ------------------------------------------------------------------
-    # Step 6: Assemble the team with HierarchicalAgentRunner
+    # Step 5: Shared event bus (AgentEventBus)
     # ------------------------------------------------------------------
-    print_step(6, "Assembling the team (HierarchicalAgentRunner)")
+    print_step(5, "Wiring delegation observability (AgentEventBus)")
 
-    team = HierarchicalAgentRunner(
-        manager_agent=manager_agent,
-        workers=workers,
+    bus = AgentEventBus()
+    reporter = DelegationReporter()
+    bus.subscribe(ToolBatchScheduledEvent, reporter.on_batch_scheduled)
+    bus.subscribe(ToolCallPreEvent, reporter.on_delegation_start)
+    bus.subscribe(ToolCallPostEvent, reporter.on_delegation_done)
+    print("    Subscribed to ToolBatchScheduledEvent, ToolCallPreEvent,")
+    print("    and ToolCallPostEvent on the manager's bus.")
+
+    # ------------------------------------------------------------------
+    # Step 6: Assemble the manager (build_worker_manager)
+    # ------------------------------------------------------------------
+    # build_worker_manager is pure wiring: a batch-capable planner
+    # (MultiActionReActPlanner) plus a ToolExecutor over the worker tools,
+    # sharing one event bus, assembled into an ordinary SimpleAgent. There
+    # is no orchestrator class: delegation IS the agent's normal tool
+    # loop, so a turn that delegates to several READ_ONLY workers at once
+    # is dispatched concurrently by the side-effect-aware executor.
+    print_step(6, "Assembling the manager (build_worker_manager)")
+
+    manager = build_worker_manager(
+        llm,
+        worker_tools,
+        prompt_builder=manager_builder,
+        events=bus,
         max_steps=15,
     )
-    print("    Team assembled!")
+    print("    Manager ready: a plain SimpleAgent whose tools are the workers.")
 
-    return team, brave_registry
+    return manager, brave_registry, reporter
 
 
 # ==============================================================================
 # SECTION 4: RUNNING THE DEMO
 # ==============================================================================
 
-async def run_preset_demo(team):
+async def run_preset_demo(manager, reporter):
     """Run a preset query to showcase the team in action."""
     print_section("RUNNING PRESET DEMO QUERY")
 
@@ -606,23 +581,36 @@ async def run_preset_demo(team):
     )
 
     print(f"\n  Query: {query}\n")
+    print("  Note: these subtasks depend on each other (the math needs the")
+    print("  price; the summary needs both), so expect the manager to chain")
+    print("  them across turns. A request with independent parts can be")
+    print("  delegated in one turn and run concurrently.")
     print("-" * 70)
 
-    result = await team.arun(query)
+    result = await manager.arun(query)
 
     print("\n" + "=" * 70)
     print("  FINAL RESEARCH REPORT")
     print("=" * 70)
     print(result)
+
+    print("\n  Delegations this run (from the event bus):")
+    for line in reporter.log:
+        print(f"    {line}")
+
+    print("\n  Manager memory (one observation per delegation, in call order):")
+    for message in manager.memory.get_history():
+        if message.content.startswith(OBSERVATION_PREFIX):
+            print(f"    {message.content[:140]}")
     return result
 
 
-async def run_interactive(team):
+async def run_interactive(manager):
     """Run in interactive mode, accepting queries from the user."""
     print_section("INTERACTIVE MODE")
     print("\n  The research team is ready for your queries!")
     print("  The team consists of:")
-    print("    - Manager:    Coordinates the research effort")
+    print("    - Manager:    A plain SimpleAgent that delegates via worker tools")
     print("    - Researcher: Searches the web for information")
     print("    - Analyst:    Performs mathematical calculations")
     print("    - Writer:     Synthesizes findings into reports")
@@ -630,6 +618,8 @@ async def run_interactive(team):
     print('    - "Find the price of Ethereum and calculate how many I can buy with $2,000"')
     print('    - "Research the latest AI trends and write a brief summary"')
     print('    - "What is 15% of 8,500?"')
+    print('    - "Separately: find the price of Bitcoin, and compute 5000 / 3.14"')
+    print("      (independent subtasks like these can fan out in one turn)")
     print("\n  Type 'exit' to quit.\n")
 
     while True:
@@ -642,7 +632,7 @@ async def run_interactive(team):
                 break
 
             print("\n" + "-" * 70)
-            result = await team.arun(user_input)
+            result = await manager.arun(user_input)
 
             print("\n" + "=" * 70)
             print("  FINAL RESEARCH REPORT")
@@ -663,20 +653,23 @@ async def main():
     """
     print_section("FAIR-LLM SHOWCASE: Multi-Agent Research Team")
     print("""
-  This demo walks you through EVERY major class in the FAIR-LLM framework
-  while building a functional 3-worker research team.
+  This demo walks you through the major classes in the FAIR-LLM framework
+  while building a functional 3-worker research team behind a fan-out
+  manager.
 
   Classes demonstrated:
     Core:      Message, Thought, Action, FinalAnswer, Document, settings
-    Prompts:   PromptBuilder, ManagerPromptBuilder, RoleDefinition,
-               FormatInstruction, Example, AgentCapability,
-               StrictFormatInstruction, DelegationExample,
-               EnhancedWorkerInstruction, WorkerInstruction, ToolInstruction
-    Agents:    SimpleAgent, HierarchicalAgentRunner
-    Planners:  SimpleReActPlanner, ManagerPlanner
+    Prompts:   PromptBuilder, RoleDefinition (the worker tool catalog is
+               auto-generated from the WorkerAgentTool schemas)
+    Agents:    SimpleAgent, WorkerAgentTool, build_worker_manager
+    Planners:  ReActPlanner, SimpleReActPlanner (workers);
+               MultiActionReActPlanner (wired inside build_worker_manager)
     Memory:    WorkingMemory
+    Events:    AgentEventBus, ToolBatchScheduledEvent, ToolCallPreEvent,
+               ToolCallPostEvent
     MAL:       HuggingFaceAdapter (supports transformers v4 AND v5)
-    Tools:     ToolRegistry, ToolExecutor, SafeCalculatorTool, WebSearcherTool
+    Tools:     ToolRegistry, ToolExecutor, SafeCalculatorTool,
+               WebSearcherTool, SideEffect
     MCP:       MCPServerConfig, CompositeToolRegistry, MCPToolRegistry
     """)
 
@@ -689,7 +682,7 @@ async def main():
     print("     OllamaAdapter without changing ANY agent code.)")
 
     # Qwen 2.5 14B Instruct: strong instruction following and JSON output,
-    # which is critical for the manager's structured delegation format.
+    # which is critical for the manager's structured multi-action format.
     # Requires ~28 GB VRAM in fp16 (fits on A6000/A100/etc.).
     # For smaller GPUs, try "qwen25-7b" (~14 GB) or "dolphin3-qwen25-3b" (~6 GB).
     #
@@ -702,13 +695,13 @@ async def main():
     # ------------------------------------------------------------------
     # Build and run the team
     # ------------------------------------------------------------------
-    team, brave_registry = await build_research_team(llm)
+    manager, brave_registry, reporter = await build_research_team(llm)
 
     # Choose mode based on command-line args
     if "--preset" in sys.argv:
-        await run_preset_demo(team)
+        await run_preset_demo(manager, reporter)
     else:
-        await run_interactive(team)
+        await run_interactive(manager)
 
     # ------------------------------------------------------------------
     # Cleanup MCP connections
@@ -724,11 +717,16 @@ async def main():
   ==============
   1. FAIRLIB IMPORTS: Everything comes from `from fairlib import ...`
   2. MAL LAYER:       Swap LLM providers without changing agent code
-  3. PROMPTBUILDER:   Compose prompts from structured, reusable pieces
+  3. PROMPTBUILDER:   Compose prompts from structured, reusable pieces;
+                      tool catalogs are generated, never hand-written
   4. AGENTS:          SimpleAgent is the workhorse; workers are stateless
-  5. MULTI-AGENT:     ManagerPlanner + HierarchicalAgentRunner = team
-  6. MCP:             Use anyone's tools via MCPServerConfig + SSE/stdio
-  7. GRACEFUL:        Always fall back when external services are unavailable
+  5. MULTI-AGENT:     WorkerAgentTool + build_worker_manager = team;
+                      the manager is itself just a SimpleAgent, and
+                      READ_ONLY delegations can fan out concurrently
+  6. OBSERVABILITY:   Subscribe to typed events on the shared bus;
+                      correlate Pre/Post by (step, call_index)
+  7. MCP:             Use anyone's tools via MCPServerConfig + SSE/stdio
+  8. GRACEFUL:        Always fall back when external services are unavailable
     """)
 
 

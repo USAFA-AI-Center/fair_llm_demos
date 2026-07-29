@@ -131,13 +131,13 @@ async def main():
     ]
 
     for q in questions:
-        print(f"\n👤 You: {q}")
+        print(f"\nYou: {q}")
         try:
             resp = await rag_agent.arun(q)
-            print(f"🤖 Agent: {resp}")
+            print(f"Agent: {resp}")
         except Exception as e:
             logger.error(f"Agent error for question '{q}': {e}", exc_info=True)
-            print("🤖 Agent: I encountered an error and couldn't process your request.")
+            print("Agent: I encountered an error and couldn't process your request.")
 
     # remove created faiss directory
     try:
@@ -155,6 +155,6 @@ if __name__ == "__main__":
             "FAIR-LLM is a Python framework for building modular agentic applications. "
             "Its fairlib.core.principles are being Flexible, Agnostic, and Interoperable. "
             "A key feature is the Model Abstraction Layer (MAL), which allows switching LLM providers easily. "
-            "It also supports multi-agent collaboration through a HierarchicalAgentRunner."
+            "It also supports multi-agent collaboration through workers-as-tools fan-out."
         )
     asyncio.run(main())

@@ -1,134 +1,156 @@
 # demo_multi_agent.py
 """
-This script serves as a hands-on tutorial and demonstration of the framework's
-most advanced feature: Hierarchical Multi-Agent Collaboration.
+Multi-agent collaboration on the workers-as-tools path: a manager model
+delegating to a research and analysis team.
 
-We will construct a "team" of AI agents with a clear reporting structure:
-1.  A "Manager" Agent: Its job is to understand a complex user request and
-    delegate sub-tasks to the appropriate worker.
-2.  "Worker" Agents: Each worker has a specialized role and a specific tool,
-    allowing it to excel at one type of task.
+A real local model (loaded through the HuggingFaceAdapter) plays the
+manager. The manager is not a special orchestrator: it is a plain
+SimpleAgent built by build_worker_manager, whose tools are worker agents
+wrapped in WorkerAgentTool. The manager model learns what each worker is
+for from the tool descriptions in its rendered tool catalog, delegates
+subtasks as ordinary typed tool calls, and synthesizes the final answer
+itself.
 
-The scenario: A user wants to perform a task that requires both real-time
-information gathering (research) and mathematical computation (analysis). No single
-agent can solve this alone, but by collaborating, the team can deliver a
-comprehensive solution.
+The scenario: a request that needs both real-time information gathering
+(web research) and mathematical computation (analysis). No single worker
+can solve it alone; the manager splits the work and combines the results.
+
+What it shows:
+  - WorkerAgentTool adapts any BaseAgent into a typed tool; the tool
+    description is what the manager model reads to choose a worker.
+  - build_worker_manager is pure wiring: a batch-capable planner plus a
+    ToolExecutor over a registry of worker tools. Delegation is an
+    ordinary tool-call turn, so the side-effect-aware executor applies.
+  - Each worker declares its own SideEffect. The analyst only computes,
+    so it is READ_ONLY: independent READ_ONLY delegations in one turn
+    run concurrently. The researcher keeps the conservative EXTERNAL
+    default because its web search reaches the network, so it runs as a
+    sequential barrier.
+  - Workers are ordinary stateless SimpleAgents with their own planners
+    and tools, the same agents you would build standalone.
+
+Note that this particular query is dependent (find the price, then divide
+the budget by it), so a sensible manager delegates in sequence here; the
+concurrency win shows up on queries whose subtasks are independent.
+
+Requirements: a local HuggingFace model (transformers) plus Google CSE
+credentials in settings.yml for the web search tool. The manager and
+workers share one loaded model, and a real model's delegation choices are
+stochastic; re-run or use a stronger instruct model if a run wanders.
 """
 import asyncio
 
-# --- Step 1: Import all necessary components ---
 from fairlib import (
-    settings,
     HuggingFaceAdapter,
-    ToolRegistry,
-    SafeCalculatorTool,
-    WebSearcherTool,
-    ToolExecutor,
-    WorkingMemory,
     ReActPlanner,
+    SafeCalculatorTool,
     SimpleAgent,
-    ManagerPlanner,
-    HierarchicalAgentRunner
+    ToolExecutor,
+    ToolRegistry,
+    WebSearcherTool,
+    WorkerAgentTool,
+    WorkingMemory,
+    build_worker_manager,
+    settings,
 )
+from fairlib.core.interfaces.tools import SideEffect
 
-def create_agent(llm, tools, role_description):
-    """
-    A helper factory function to simplify the creation of worker agents.
-    Each agent gets its own tool registry, planner, executor, and memory.
+
+def create_worker(llm, tools):
+    """Build an ordinary stateless worker agent around its own tools.
+
+    This is the same construction a standalone agent uses; nothing about a
+    worker is manager-specific until WorkerAgentTool wraps it. What each
+    worker is for is stated in the WorkerAgentTool description, which the
+    manager model reads from its rendered tool catalog.
     """
     tool_registry = ToolRegistry()
     for tool in tools:
         tool_registry.register_tool(tool)
-    
+
     planner = ReActPlanner(llm, tool_registry)
     executor = ToolExecutor(tool_registry)
     memory = WorkingMemory()
-    
-    # create a stateless agent
-    agent = SimpleAgent(llm, planner, executor, memory, stateless=True)
 
-    # This custom attribute helps the manager understand the worker's purpose.
-    agent.role_description = role_description
-    return agent
+    # Stateless: each delegation is planned fresh, not against the
+    # accumulated history of earlier delegations.
+    return SimpleAgent(llm, planner, executor, memory, stateless=True)
 
 
 async def main():
-    """
-    The main function to set up and run the multi-agent system.
-    """
-    # check if the web search tool can be used
+    """Set up and run the multi-agent team."""
+    # The web search tool needs Google CSE credentials; without them the
+    # researcher cannot do its job, so bail out early.
     if not settings.search_engine.google_cse_search_api or not settings.search_engine.google_cse_search_engine_id:
         print("A google search engine API key as well as search engine ID needs to be set to run this demo. Exiting...")
         return
-    # --- Step 2: Initialize Core Components ---
-    # We load our settings using the validated Pydantic configuration loader.
-    # This ensures all necessary API keys and model settings are present.
+
+    # --- Step 1: Initialize the shared model ---
     print("Initializing fairlib.core.components...")
     llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
 
-    # --- Step 3: Create Specialized Worker Agents ---
-    # Here, we build our team of specialists. Each worker is a standard
-    # ReAct agent but is given a very specific role and a limited set of tools.
-
+    # --- Step 2: Create Specialized Worker Agents ---
+    # Each worker is a standard ReAct agent with a limited set of tools.
     print("Building the agent team...")
-    
-    # The Researcher: Its only tool is the WebSearcher. Its role is clearly defined.
+
     web_search_config = {
-            "google_api_key": settings.search_engine.google_cse_search_api,
-            "google_search_engine_id": settings.search_engine.google_cse_search_engine_id,
-            "cache_ttl": settings.search_engine.web_search_cache_ttl,
-            "cache_max_size": settings.search_engine.web_search_cache_max_size,
-            "max_results": settings.search_engine.web_search_max_results,
+        "google_api_key": settings.search_engine.google_cse_search_api,
+        "google_search_engine_id": settings.search_engine.google_cse_search_engine_id,
+        "cache_ttl": settings.search_engine.web_search_cache_ttl,
+        "cache_max_size": settings.search_engine.web_search_cache_max_size,
+        "max_results": settings.search_engine.web_search_max_results,
     }
 
-    researcher = create_agent(
-        llm,
-        [WebSearcherTool(config=web_search_config)],
-        "A research agent that uses a web search tool to find current, real-time information like prices, news, and facts."
-    )
+    researcher = create_worker(llm, [WebSearcherTool(config=web_search_config)])
+    analyst = create_worker(llm, [SafeCalculatorTool()])
 
-    # The Analyst: Its only tool is the SafeCalculator. It's designed for math.
-    analyst = create_agent(
-        llm,
-        [SafeCalculatorTool()],
-        "An analyst agent that performs mathematical calculations using a safe calculator."
-    )
+    # --- Step 3: Wrap each worker as a typed tool ---
+    # The description is what the manager model sees; it replaces the old
+    # role_description roster. The researcher keeps the conservative
+    # EXTERNAL default because its web search reaches the network, so its
+    # delegations run as sequential barriers. The analyst only computes,
+    # so READ_ONLY is the author's assertion that lets independent analyst
+    # delegations in one turn run concurrently.
+    worker_tools = [
+        WorkerAgentTool(
+            researcher,
+            name="researcher",
+            description=(
+                "Delegate a research subtask, phrased as a complete question, "
+                "to an agent that uses a web search tool to find current, "
+                "real-time information like prices, news, and facts."
+            ),
+        ),
+        WorkerAgentTool(
+            analyst,
+            name="analyst",
+            description=(
+                "Delegate a math subtask, phrased as a complete question, "
+                "to an analyst agent that performs calculations with a safe "
+                "calculator."
+            ),
+            side_effect=SideEffect.READ_ONLY,
+        ),
+    ]
 
-    # We organize the workers in a dictionary so the manager can find them by name.
-    workers = {"Researcher": researcher, "Analyst": analyst}
+    # --- Step 4: Build the Manager ---
+    # A plain SimpleAgent over the worker tools; the model sees the
+    # workers through the rendered tool catalog and decides for itself
+    # what to delegate and when to answer.
+    manager = build_worker_manager(llm, worker_tools)
 
-    # --- Step 4: Create the Manager Agent ---
-    # The manager is a special type of agent. It doesn't have regular tools.
-    # Instead, its "tool" is the ability to delegate tasks to its workers.
-    # We equip it with the special ManagerPlanner.
-    manager_memory = WorkingMemory()
-    manager_planner = ManagerPlanner(llm, workers)
-    
-    # Note: The manager's ToolExecutor is None because it should never execute
-    # a tool directly. Its planner will only produce 'delegate' or 'final_answer' actions.
-    manager_agent = SimpleAgent(llm, manager_planner, None, manager_memory) 
-
-    # --- Step 5: Initialize the Hierarchical Runner ---
-    # The runner is the orchestrator that connects the manager to the workers
-    # and manages the overall flow of the conversation.
-    team_runner = HierarchicalAgentRunner(manager_agent, workers)
-    
-    # --- Step 6: Define a Complex User Query ---
-    # This query is designed to be unsolvable by any single worker.
-    # It requires the Researcher to find the price and the Analyst to perform the calculation.
+    # --- Step 5: Define a Complex User Query ---
+    # Unsolvable by any single worker: the researcher finds the price and
+    # the analyst performs the calculation.
     user_query = "My budget is $5,000. Please find the current price of Bitcoin and then calculate exactly how many Bitcoins I can afford to buy."
-    
-    # --- Step 7: Run the Agent Team ---
-    # We call the arun method on the runner, which kicks off the entire
-    # collaborative process. The runner will print the internal thoughts
-    # and actions of the agents as it works.
-    final_answer = await team_runner.arun(user_query)
-    
-    # --- Step 8: Display the Final Result ---
-    print("\n✅ --- FINAL Synthesized Answer ---")
+
+    # --- Step 6: Run the Agent Team ---
+    final_answer = await manager.arun(user_query)
+
+    # --- Step 7: Display the Final Result ---
+    print("\n--- FINAL Synthesized Answer ---")
     print(final_answer)
 
 
 if __name__ == "__main__":
-    # Run the asynchronous main function.
     asyncio.run(main())

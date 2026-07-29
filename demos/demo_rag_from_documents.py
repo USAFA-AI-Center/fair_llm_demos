@@ -173,6 +173,6 @@ if __name__ == "__main__":
             "FAIR-LLM is a Python framework for building modular agentic applications. "
             "Its core principles are being Flexible, Agnostic, and Interoperable. "
             "A key feature is the Model Abstraction Layer (MAL), which allows switching LLM providers easily. "
-            "It also supports multi-agent collaboration through a HierarchicalAgentRunner."
+            "It also supports multi-agent collaboration through workers-as-tools fan-out."
         )
     asyncio.run(main())

@@ -16,6 +16,7 @@ from fairlib import (
     ToolRegistry,
     ToolExecutor
 )
+from fairlib.core.errors import FairlibError
 
 from fairlib.core.interfaces.llm import AbstractChatModel # Keep interface for type hinting
 
@@ -57,17 +58,15 @@ async def main():
     # --- Step 4: Create an Identical Agent for Each Model ---
     print("\nCreating an agent for each initialized model...")
     # descriptive role to give to each agent
-    role = """You are a creative poet who responds directly with your poetry.
-
-            CRITICAL INSTRUCTIONS:
-            - You do NOT have access to any tools, functions, or external systems
-            - You must respond ONLY with plain text - never attempt to call functions or use tools
-            - Write your poems directly in your response
-            - Do NOT use JSON, function calls, or tool invocations of any kind
-            - Simply write the poem as natural text in your reply
-
-            When asked to write a poem, immediately begin writing the poem itself. 
-            Do not describe what tools you would use or mention any functions. Just write the poem."""
+    # The role sets personality only. The planner owns the response format:
+    # its rendered instructions already tell the model to deliver the poem
+    # through a final_answer turn, and role text that contradicts the
+    # planner contract (for example forbidding JSON) makes weak models fail
+    # every turn.
+    role = (
+        "You are a creative poet. You have no tools; when asked for a poem, "
+        "deliver the finished poem itself as your final answer."
+    )
     
     agents = {
         name: create_comparison_agent(model, role) for name, model in models.items()
@@ -79,19 +78,26 @@ async def main():
     print(f"\n--- Giving all agents the same prompt: ---\n'{prompt}'\n")
 
     # --- Step 6: Run All Agents in Parallel ---
-    # asyncio.gather is a an efficient way to run multiple async tasks concurrently.
+    # return_exceptions keeps one model's failure from cancelling the
+    # comparison: a weak model failing typed (PlannerParseError,
+    # MaxStepsExceeded) is itself a comparison result worth displaying.
     tasks = [agent.arun(prompt) for agent in agents.values()]
-    responses = await asyncio.gather(*tasks)
-    
+    responses = await asyncio.gather(*tasks, return_exceptions=True)
+
     results = dict(zip(agents.keys(), responses))
 
     # --- Step 7: Display the Side-by-Side Comparison ---
-    print("--- 📊 Model Comparison Results ---")
+    print("--- Model Comparison Results ---")
     for model_name, response in results.items():
         print("\n=====================================")
         print(f"   Model: {model_name}")
         print("=====================================")
-        print(response)
+        if isinstance(response, FairlibError):
+            print(f"FAILED ({type(response).__name__}): {response}")
+        elif isinstance(response, BaseException):
+            raise response
+        else:
+            print(response)
         print("-------------------------------------")
 
 if __name__ == "__main__":

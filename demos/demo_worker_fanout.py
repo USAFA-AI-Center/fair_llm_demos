@@ -76,7 +76,7 @@ from fairlib.core.interfaces.tools import (
     TextResult,
     ToolOutput,
 )
-from fairlib.core.message import OBSERVATION_PREFIX
+from fairlib import OBSERVATION_PREFIX
 
 MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 
@@ -141,12 +141,12 @@ def _on_schedule(event: ToolBatchScheduledEvent) -> None:
 def _on_pre(event: ToolCallPreEvent) -> None:
     _in_flight["now"] += 1
     _in_flight["max"] = max(_in_flight["max"], _in_flight["now"])
-    _starts[(event.step, event.tool_name)] = time.perf_counter()
+    _starts[(event.step, event.call_index)] = time.perf_counter()
 
 
 def _on_post(event: ToolCallPostEvent) -> None:
     _in_flight["now"] -= 1
-    started = _starts.pop((event.step, event.tool_name), None)
+    started = _starts.pop((event.step, event.call_index), None)
     duration = time.perf_counter() - started if started is not None else 0.0
     _durations.append(duration)
     print(
@@ -231,9 +231,10 @@ async def main() -> None:
         )
     else:
         print(
-            "The model delegated one subtask per turn this run, so each took "
-            "the single-call path. Re-run, or set FAIR_LLM_DEMO_MODEL to a "
-            "stronger instruct model, to see a parallel fan-out turn."
+            "The model delegated one subtask per turn this run - batches "
+            "of one, dispatched sequentially. Re-run, or set "
+            "FAIR_LLM_DEMO_MODEL to a stronger instruct model, to see a "
+            "parallel fan-out turn."
         )
 
     print("\nManager memory (one observation per delegation, in call order):")

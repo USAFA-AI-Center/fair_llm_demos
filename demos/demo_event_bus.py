@@ -88,11 +88,11 @@ class AgentMonitor:
         )
 
     def _on_tool_pre(self, event: ToolCallPreEvent) -> None:
-        self._tool_started_at[(event.step, event.tool_name)] = time.monotonic()
+        self._tool_started_at[(event.step, event.call_index)] = time.monotonic()
         print(f"    |   -> {event.tool_name}({str(event.tool_input)[:50]})")
 
     def _on_tool_post(self, event: ToolCallPostEvent) -> None:
-        started = self._tool_started_at.pop((event.step, event.tool_name), None)
+        started = self._tool_started_at.pop((event.step, event.call_index), None)
         elapsed = f" in {time.monotonic() - started:.2f}s" if started else ""
         outcome = "ok" if event.succeeded else f"FAILED: {event.error}"
         print(f"    |   <- {event.tool_name} {outcome}{elapsed}")

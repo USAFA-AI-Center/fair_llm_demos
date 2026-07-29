@@ -24,10 +24,10 @@ def main() -> None:
     planner._provider = "ollama"
     planner._event_bus = bus
 
-    result = planner._parse_response(duplicated)
-    thought, parsed = result
-    print("Recovered thought:", thought.text)
-    print("Recovered action:", parsed.tool_name, parsed.tool_input)
+    batch = planner._parse_response(duplicated)
+    action = batch.actions[0]
+    print("Recovered thought:", batch.thought.text)
+    print("Recovered action:", action.tool_name, action.tool_input)
     print("Trim event emitted:", len(events) == 1)
     if events:
         print("Original length:", events[0].original_length)
