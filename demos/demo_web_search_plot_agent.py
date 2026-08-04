@@ -418,7 +418,9 @@ async def main():
     # Ordinary specialist agents; the whole team shares one loaded model.
     researcher = create_worker(llm, [WebSearcherTool(config=web_search_config)])
 
-    data_extractor = create_worker(llm, [WebDataExtractor(llm=llm)])
+    data_extractor = create_worker(
+        llm, [WebDataExtractor(llm=llm, security_manager=BasicSecurityManager.from_settings(settings))]
+    )
 
     grapher = create_worker(llm, [GraphingTool(
         security_manager=BasicSecurityManager(),
