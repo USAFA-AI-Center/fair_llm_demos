@@ -1,41 +1,52 @@
-# demo_huggingface_v5.py
-import asyncio
-
+# demo_huggingface.py
 """
-This script demonstrates the v5-specific features of the HuggingFace adapter.
+This script demonstrates the HuggingFace adapter.
 
-When transformers v5 is installed, the adapter automatically:
+On transformers v5 (the pinned version), the adapter automatically:
   1. Detects the version and sets the TRANSFORMERS_V5 flag
   2. Passes attn_implementation="sdpa" for faster inference
   3. Uses AsyncTextIteratorStreamer for true async streaming
   4. Handles BatchEncoding returns from apply_chat_template
 
-This demo walks through all adapter methods with v5-aware commentary, then
-drops you into an interactive chat loop. It works on v4 too — you will just
+This demo walks through all adapter methods, then drops you into an
+interactive chat loop. It works on transformers v4 too - you will just
 see the v4 fallback behavior instead.
-
-For the v4-focused walkthrough, see demo_huggingface_v4.py.
 """
 
 # --- Step 1: Import the necessary components ---
-from fairlib.modules.mal.huggingface_adapter import (
+import asyncio
+import os
+import sys
+
+from fairlib import (
+    DegradedResponse,
+    FairlibError,
     HuggingFaceAdapter,
-    TRANSFORMERS_V5,
+    Message,
+    RoleDefinition,
+    SafeCalculatorTool,
+    SimpleAgent,
+    SimpleReActPlanner,
+    ToolExecutor,
+    ToolRegistry,
+    WorkingMemory,
 )
-from fairlib.core.errors import DegradedResponse
-from fairlib.core.message import Message
+from fairlib.modules.mal.huggingface_adapter import TRANSFORMERS_V5
+
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
 
 
 async def main():
     """
-    The main function to demonstrate v5-specific HuggingFace adapter features.
+    The main function to demonstrate the HuggingFace adapter.
     """
 
     # --- Step 2: Show version detection ---
-    print("=== HuggingFace Adapter Demo (v5 Features) ===\n")
+    print("=== HuggingFace Adapter Demo ===\n")
 
     try:
         import transformers
+
         print(f"  transformers version: {transformers.__version__}")
     except Exception:
         print("  transformers: not available")
@@ -47,7 +58,9 @@ async def main():
         print("     - AsyncTextIteratorStreamer for async streaming")
         print("     - BatchEncoding handling in _format_prompt()")
     else:
-        print("  -> v4 codepath ACTIVE (upgrade to transformers>=5.0.0 for v5 features)")
+        print(
+            "  -> v4 codepath ACTIVE (upgrade to transformers>=5.0.0 for v5 features)"
+        )
     print()
 
     # --- Step 3: Load the model with v5-relevant constructor arguments ---
@@ -56,26 +69,26 @@ async def main():
     #   attn_implementation="flash_attention_2"  (requires flash-attn package)
     #   attn_implementation="eager"              (disable optimized attention)
 
-    print("Loading model: tinyllama")
+    print(f"Loading model: {MODEL_NAME}")
     print("  (v5 will auto-set attn_implementation='sdpa' for faster inference)")
     llm = HuggingFaceAdapter(
-        model_name="tinyllama",
+        model_name=MODEL_NAME,
         quantized=False,
         stream=True,
         auth_token=None,
         verbose=True,
         max_new_tokens=256,
-        temperature=0.7,
+        temperature=0.3,
         top_p=0.9,
         # v5-specific: override attention implementation if desired
         # attn_implementation="flash_attention_2",
     )
     print("Model loaded successfully.\n")
 
-    # --- Step 4: _prepare_messages() — clean dict output ---
+    # --- Step 4: _prepare_messages() - clean dict output ---
     # This helper strips metadata and None fields so v5 chat templates
     # do not choke on unexpected keys.
-    print("=== _prepare_messages() — Clean Message Dicts ===")
+    print("=== _prepare_messages() - Clean Message Dicts ===")
     raw_messages = [
         Message(role="system", content="Be concise.", metadata={"source": "demo"}),
         Message(role="user", content="Hello!", name=None, tool_calls=None),
@@ -92,7 +105,7 @@ async def main():
         print(f"  {key}: {val}")
     print()
 
-    # --- Step 6: invoke() — synchronous generation ---
+    # --- Step 6: invoke() - synchronous generation ---
     print("=== invoke() ===")
     response = llm.invoke(
         [
@@ -106,7 +119,7 @@ async def main():
     )
     print(f"  Assistant: {response.content}\n")
 
-    # --- Step 7: ainvoke() — async generation ---
+    # --- Step 7: ainvoke() - async generation ---
     print("=== ainvoke() ===")
     async_response = await llm.ainvoke(
         [Message(role="user", content="Name three programming languages.")],
@@ -114,11 +127,11 @@ async def main():
     )
     print(f"  Assistant: {async_response.content}\n")
 
-    # --- Step 8: stream() — synchronous streaming ---
+    # --- Step 8: stream() - synchronous streaming ---
     # Uses TextIteratorStreamer + Thread (works on both v4 and v5).
     # Streams raise DegradedResponse on provider failure instead of
     # yielding an error-text chunk, so wrap iteration when rendering.
-    print("=== stream() — Synchronous Streaming ===")
+    print("=== stream() - Synchronous Streaming ===")
     print("  Assistant: ", end="", flush=True)
     try:
         for chunk in llm.stream(
@@ -130,10 +143,10 @@ async def main():
         print(f"\n  [stream degraded: {exc.kind.value}]")
     print("\n")
 
-    # --- Step 9: astream() — async streaming ---
+    # --- Step 9: astream() - async streaming ---
     # On v5: uses AsyncTextIteratorStreamer for true non-blocking iteration.
     # On v4: falls back to ainvoke() and yields a single Message.
-    print("=== astream() — Async Streaming ===")
+    print("=== astream() - Async Streaming ===")
     if TRANSFORMERS_V5:
         print("  (v5: using AsyncTextIteratorStreamer)")
     else:
@@ -149,35 +162,54 @@ async def main():
         print(f"\n  [stream degraded: {exc.kind.value}]")
     print("\n")
 
-    # --- Step 10: chat() — convenience method ---
-    print("=== chat() — Convenience Method ===")
+    # --- Step 10: chat() - convenience method ---
+    print("=== chat() - Convenience Method ===")
     chat_response = llm.chat(
         [Message(role="user", content="What is 2 + 2?")],
         temperature=0.3,
     )
     print(f"  Assistant: {chat_response}\n")
 
-    # --- Step 11: Interactive chat loop ---
+    # --- Step 11: The same adapter as the brain of an agent ---
+    # Everything above talked to the model directly. An agent wraps the
+    # adapter with a planner, tools, and memory, so the model can reason
+    # about when to call a tool instead of guessing at arithmetic.
     print("=" * 60)
-    print("Interactive chat — type 'exit' or 'quit' to stop.")
+    print("Interactive agent - type 'exit' or 'quit' to stop.")
     print("=" * 60)
 
-    history = [
-        Message(role="system", content="You are a friendly assistant. Keep answers short."),
-    ]
+    tool_registry = ToolRegistry()
+    tool_registry.register_tool(SafeCalculatorTool())
+    planner = SimpleReActPlanner(llm, tool_registry)
+    planner.prompt_builder.role_definition = RoleDefinition(
+        "You are a friendly assistant. Use the calculator for any arithmetic "
+        "and keep answers short."
+    )
+    agent = SimpleAgent(
+        llm=llm,
+        planner=planner,
+        tool_executor=ToolExecutor(tool_registry),
+        memory=WorkingMemory(),
+        max_steps=6,
+    )
 
+    print("\nYou: What is 123 * 45?")
+    try:
+        print(f"Agent: {await agent.arun('What is 123 * 45?')}")
+    except FairlibError as exc:
+        # A small sampled model can wander; the framework reports that as a
+        # typed error rather than a made-up answer.
+        print(f"Agent run ended with {type(exc).__name__}: {exc}")
+
+    if not sys.stdin.isatty():
+        return
     while True:
         try:
             user_input = input("\nYou: ")
             if user_input.lower() in ["exit", "quit"]:
-                print("Assistant: Goodbye!")
+                print("Agent: Goodbye!")
                 break
-
-            history.append(Message(role="user", content=user_input))
-            agent_response = llm.invoke(history)
-            print(f"Assistant: {agent_response.content}")
-            history.append(agent_response)
-
+            print(f"Agent: {await agent.arun(user_input)}")
         except KeyboardInterrupt:
             print("\nExiting...")
             break

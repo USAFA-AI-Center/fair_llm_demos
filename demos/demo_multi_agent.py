@@ -38,6 +38,7 @@ credentials in settings.yml for the web search tool. The manager and
 workers share one loaded model, and a real model's delegation choices are
 stochastic; re-run or use a stronger instruct model if a run wanders.
 """
+
 import asyncio
 
 from fairlib import (
@@ -81,8 +82,13 @@ async def main():
     """Set up and run the multi-agent team."""
     # The web search tool needs Google CSE credentials; without them the
     # researcher cannot do its job, so bail out early.
-    if not settings.search_engine.google_cse_search_api or not settings.search_engine.google_cse_search_engine_id:
-        print("A google search engine API key as well as search engine ID needs to be set to run this demo. Exiting...")
+    if (
+        not settings.search_engine.google_cse_search_api
+        or not settings.search_engine.google_cse_search_engine_id
+    ):
+        print(
+            "A google search engine API key as well as search engine ID needs to be set to run this demo. Exiting..."
+        )
         return
 
     # --- Step 1: Initialize the shared model ---

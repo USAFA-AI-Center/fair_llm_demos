@@ -112,6 +112,7 @@ Usage with RAG Fact-Checking:
 The script will then process each essay in the essays_to_grade folder and
 generate a detailed .txt report for each one in the graded_essays folder.
 """
+
 import argparse
 import asyncio
 import json
@@ -124,7 +125,7 @@ from fairlib import (
     AgentEventBus,
     GradeEssayFromRubricTool,
     HuggingFaceAdapter,
-    KnowledgeBaseQueryTool,
+    RAGQueryTool,
     SimpleAgent,
     SimpleRetriever,
     WorkerAgentTool,
@@ -133,8 +134,6 @@ from fairlib import (
 from fairlib.core.events import ToolCallPostEvent
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.interfaces.tools import AbstractTool, SideEffect
-
-# Step 1: Import from the fairlib.utils module and the central fairlib API
 from fairlib.utils.autograder_utils import (
     create_agent,
     format_report,
@@ -144,6 +143,7 @@ from fairlib.utils.document_processor import DocumentProcessor
 
 # Configure logger for this specific module
 logger = logging.getLogger(__name__)
+
 
 # Step 2: Committee construction. Each grader is an ordinary stateless
 # SimpleAgent from the shared autograder factory; nothing about a grader is
@@ -159,9 +159,7 @@ def create_grader(
     events: Optional[AgentEventBus] = None,
 ) -> SimpleAgent:
     """Build one stateless committee grader via the shared agent factory."""
-    return create_agent(
-        llm, role_description, tools, stateless=True, events=events
-    )
+    return create_agent(llm, role_description, tools, stateless=True, events=events)
 
 
 # Step 3: Main Essay Grading Orchestration
@@ -211,9 +209,9 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     if knowledge_base:
         fact_checker = create_grader(
             llm,
-            "A research assistant. Use the 'course_knowledge_query' tool to "
+            "A research assistant. Use the 'search_knowledge_base' tool to "
             "verify claims made in a text against the course materials.",
-            [KnowledgeBaseQueryTool(SimpleRetriever(knowledge_base.vector_store))],
+            [RAGQueryTool(SimpleRetriever(knowledge_base.vector_store))],
         )
         worker_tools.append(
             WorkerAgentTool(
@@ -235,8 +233,7 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     )
     clarity_checker = create_grader(
         llm,
-        "A university writing tutor. Analyze the essay's grammar, clarity, "
-        "and style.",
+        "A university writing tutor. Analyze the essay's grammar, clarity, and style.",
     )
     rubric_aligner = create_grader(
         llm,
@@ -245,38 +242,40 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
         [GradeEssayFromRubricTool(llm)],
         events=bus,
     )
-    worker_tools.extend([
-        WorkerAgentTool(
-            content_analyst,
-            name="content_analyst",
-            description=(
-                "Delegate a content-analysis subtask: include the essay text "
-                "and any earlier committee reports, and this professor "
-                "evaluates argument strength, evidence, and depth."
+    worker_tools.extend(
+        [
+            WorkerAgentTool(
+                content_analyst,
+                name="content_analyst",
+                description=(
+                    "Delegate a content-analysis subtask: include the essay text "
+                    "and any earlier committee reports, and this professor "
+                    "evaluates argument strength, evidence, and depth."
+                ),
+                side_effect=SideEffect.READ_ONLY,
             ),
-            side_effect=SideEffect.READ_ONLY,
-        ),
-        WorkerAgentTool(
-            clarity_checker,
-            name="clarity_style_checker",
-            description=(
-                "Delegate a writing-quality subtask: include the essay text, "
-                "and this writing tutor reports on grammar, clarity, and "
-                "style only, ignoring content accuracy."
+            WorkerAgentTool(
+                clarity_checker,
+                name="clarity_style_checker",
+                description=(
+                    "Delegate a writing-quality subtask: include the essay text, "
+                    "and this writing tutor reports on grammar, clarity, and "
+                    "style only, ignoring content accuracy."
+                ),
+                side_effect=SideEffect.READ_ONLY,
             ),
-            side_effect=SideEffect.READ_ONLY,
-        ),
-        WorkerAgentTool(
-            rubric_aligner,
-            name="rubric_aligner",
-            description=(
-                "Delegate the final grading subtask: include the rubric, the "
-                "essay, and the synthesized committee reports, and this TA "
-                "returns the structured JSON grade."
+            WorkerAgentTool(
+                rubric_aligner,
+                name="rubric_aligner",
+                description=(
+                    "Delegate the final grading subtask: include the rubric, the "
+                    "essay, and the synthesized committee reports, and this TA "
+                    "returns the structured JSON grade."
+                ),
+                side_effect=SideEffect.READ_ONLY,
             ),
-            side_effect=SideEffect.READ_ONLY,
-        ),
-    ])
+        ]
+    )
 
     # The manager is a plain SimpleAgent over the worker tools: no special
     # orchestrator class, no separate roster. The model sees the committee
@@ -293,7 +292,10 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     ]
     # Conditionally add the fact-checking step if it's available.
     if knowledge_base:
-        workflow_steps.insert(0, "Delegate to the `fact_checker` tool to verify any factual claims in the essay.")
+        workflow_steps.insert(
+            0,
+            "Delegate to the `fact_checker` tool to verify any factual claims in the essay.",
+        )
         workflow_steps.insert(
             2,
             "The fact-checking and writing-quality delegations are "
@@ -301,14 +303,18 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
             "and they will run concurrently.",
         )
 
-    workflow_steps.extend([
-        "After gathering initial reports, delegate to the `content_analyst` tool, providing it with the original essay AND the reports from the other workers for full context.",
-        "Synthesize all reports (style, content, and fact-checking).",
-        "Delegate to the `rubric_aligner` tool with all synthesized information to get the final structured grade.",
-        "Present the structured grade as your final answer."
-    ])
+    workflow_steps.extend(
+        [
+            "After gathering initial reports, delegate to the `content_analyst` tool, providing it with the original essay AND the reports from the other workers for full context.",
+            "Synthesize all reports (style, content, and fact-checking).",
+            "Delegate to the `rubric_aligner` tool with all synthesized information to get the final structured grade.",
+            "Present the structured grade as your final answer.",
+        ]
+    )
 
-    workflow_text = "".join(f"{i+1}. {step}\n" for i, step in enumerate(workflow_steps))
+    workflow_text = "".join(
+        f"{i + 1}. {step}\n" for i, step in enumerate(workflow_steps)
+    )
     manager_prompt = f"""
     Please coordinate your team to grade the following student essay based on the provided rubric.
 
@@ -333,8 +339,14 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
             return structured_grades[-1]
         return final_evaluation
     except Exception as e:
-        logger.error(f"The multi-agent run failed for {essay_filename}: {e}", exc_info=True)
-        return json.dumps({"error": f"A critical error occurred during the agent execution for this essay. Details: {e}"})
+        logger.error(
+            f"The multi-agent run failed for {essay_filename}: {e}", exc_info=True
+        )
+        return json.dumps(
+            {
+                "error": f"A critical error occurred during the agent execution for this essay. Details: {e}"
+            }
+        )
 
 
 # Main execution block
@@ -347,7 +359,11 @@ async def main(essays_dir, rubric_path, output_dir, materials_dir):
     # The prompt needs the rubric as one plain-text block, and grading
     # judges each essay whole with one report per student, so both loads
     # use the processor's whole-file surface rather than its RAG chunking.
-    rubric_content = doc_proc.read_file_text(str(Path(rubric_path)))
+    try:
+        rubric_content = doc_proc.read_file_text(str(Path(rubric_path)))
+    except ImportError as e:
+        logger.critical(f"Could not load rubric from '{rubric_path}': {e}. Exiting.")
+        return
     if not rubric_content:
         logger.critical(f"Could not load rubric from '{rubric_path}'. Exiting.")
         return
@@ -366,30 +382,54 @@ async def main(essays_dir, rubric_path, output_dir, materials_dir):
             grade_json = await grade_single_essay(essay, rubric_content, knowledge_base)
             original_filename = Path(essay.metadata["source"]).stem
             report_filepath = output_path / f"{original_filename}_grade_report.txt"
-            report_content = format_report(grade_json, Path(essay.metadata["source"]).name)
-            report_filepath.write_text(report_content, encoding='utf-8')
+            report_content = format_report(
+                grade_json, Path(essay.metadata["source"]).name
+            )
+            report_filepath.write_text(report_content, encoding="utf-8")
             logger.info(f"Grade report saved to: {report_filepath}")
         except Exception as e:
-            logger.error(f"A critical error occurred while processing {essay.metadata.get('source', 'an essay')}. Skipping. Error: {e}", exc_info=True)
+            logger.error(
+                f"A critical error occurred while processing {essay.metadata.get('source', 'an essay')}. Skipping. Error: {e}",
+                exc_info=True,
+            )
             # Optionally, write an error report for the failed essay
-            error_report_path = output_path / f"{Path(essay.metadata.get('source', 'failed_essay')).stem}_error_report.txt"
-            error_report_path.write_text(f"Failed to grade this essay due to a critical error:\n{e}")
-    
+            error_report_path = (
+                output_path
+                / f"{Path(essay.metadata.get('source', 'failed_essay')).stem}_error_report.txt"
+            )
+            error_report_path.write_text(
+                f"Failed to grade this essay due to a critical error:\n{e}"
+            )
+
     logger.info("\n--- Essay Grading Batch Complete ---")
 
 
 if __name__ == "__main__":
     # Setup command-line argument parsing
     parser = argparse.ArgumentParser(description="Multi-Agent AI Essay Autograder")
-    parser.add_argument("--essays", type=str, required=True, help="Directory with student essays.")
-    parser.add_argument("--rubric", type=str, required=True, help="Path to the grading rubric .txt file.")
-    parser.add_argument("--output", type=str, required=True, help="Directory to save grade reports.")
-    parser.add_argument("--materials", type=str, default=None, help="Optional: Directory with course materials for RAG.")
+    parser.add_argument(
+        "--essays", type=str, required=True, help="Directory with student essays."
+    )
+    parser.add_argument(
+        "--rubric",
+        type=str,
+        required=True,
+        help="Path to the grading rubric .txt file.",
+    )
+    parser.add_argument(
+        "--output", type=str, required=True, help="Directory to save grade reports."
+    )
+    parser.add_argument(
+        "--materials",
+        type=str,
+        default=None,
+        help="Optional: Directory with course materials for RAG.",
+    )
     args = parser.parse_args()
 
     # Create dummy directories and files for demonstration if they don't exist
     Path(args.essays).mkdir(exist_ok=True)
-    if not list(Path(args.essays).glob('*')):
+    if not list(Path(args.essays).glob("*")):
         (Path(args.essays) / "sample_essay.txt").write_text("This is a sample essay.")
 
     if not Path(args.rubric).exists():
@@ -400,4 +440,3 @@ if __name__ == "__main__":
 
     # Run the main asynchronous function
     asyncio.run(main(args.essays, args.rubric, args.output, args.materials))
-

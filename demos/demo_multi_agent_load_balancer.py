@@ -48,13 +48,13 @@ import time
 
 from fairlib import (
     LoadBalancerAdapter,
-    ToolRegistry,
+    RoleDefinition,
     SafeCalculatorTool,
-    ToolExecutor,
-    WorkingMemory,
     SimpleAgent,
     SimpleReActPlanner,
-    RoleDefinition
+    ToolExecutor,
+    ToolRegistry,
+    WorkingMemory,
 )
 
 # =============================================================================
@@ -82,11 +82,7 @@ def create_calculator_agent(llm, agent_id: int) -> SimpleAgent:
     )
 
     return SimpleAgent(
-        llm=llm,
-        planner=planner,
-        tool_executor=executor,
-        memory=memory,
-        max_steps=5
+        llm=llm, planner=planner, tool_executor=executor, memory=memory, max_steps=5
     )
 
 
@@ -99,11 +95,23 @@ async def run_agent(agent: SimpleAgent, agent_id: int, task: str) -> dict:
         response = await agent.arun(task)
         elapsed = time.time() - start
         print(f"[Agent {agent_id}] Done in {elapsed:.2f}s")
-        return {"agent_id": agent_id, "task": task, "response": response, "time": elapsed, "success": True}
+        return {
+            "agent_id": agent_id,
+            "task": task,
+            "response": response,
+            "time": elapsed,
+            "success": True,
+        }
     except Exception as e:
         elapsed = time.time() - start
         print(f"[Agent {agent_id}] Failed: {e}")
-        return {"agent_id": agent_id, "task": task, "response": str(e), "time": elapsed, "success": False}
+        return {
+            "agent_id": agent_id,
+            "task": task,
+            "response": str(e),
+            "time": elapsed,
+            "success": False,
+        }
 
 
 async def main():
@@ -123,7 +131,7 @@ async def main():
         model=MODEL,
         timeout=900,
         verbose=True,
-        preload_model=True
+        preload_model=True,
     )
 
     # Show cluster status
@@ -150,10 +158,12 @@ async def main():
 
     start_time = time.time()
 
-    results = await asyncio.gather(*[
-        run_agent(agent, i + 1, tasks[i % len(tasks)])
-        for i, agent in enumerate(agents)
-    ])
+    results = await asyncio.gather(
+        *[
+            run_agent(agent, i + 1, tasks[i % len(tasks)])
+            for i, agent in enumerate(agents)
+        ]
+    )
 
     total_time = time.time() - start_time
 

@@ -52,6 +52,7 @@ import time
 from typing import List
 
 from fairlib import (
+    OBSERVATION_PREFIX,
     AbstractChatModel,
     AgentEventBus,
     HuggingFaceAdapter,
@@ -76,7 +77,6 @@ from fairlib.core.interfaces.tools import (
     TextResult,
     ToolOutput,
 )
-from fairlib import OBSERVATION_PREFIX
 
 MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 
@@ -108,7 +108,9 @@ class _CountryFactsTool(AbstractTool):
 
     async def acall(self, tool_input: StringInput) -> ToolOutput:
         key = tool_input.input.strip().lower()
-        return TextResult(result=_FACTS.get(key, "No facts on record for that country."))
+        return TextResult(
+            result=_FACTS.get(key, "No facts on record for that country.")
+        )
 
 
 def create_worker(llm: AbstractChatModel, tools: List[AbstractTool]) -> SimpleAgent:
@@ -135,7 +137,9 @@ def _on_schedule(event: ToolBatchScheduledEvent) -> None:
     print(f"\n[scheduler] {event.batch_size} delegations in one turn:")
     for i, group in enumerate(event.groups, start=1):
         how = "PARALLEL" if group.parallel else "sequential"
-        print(f"  group {i}: {how:11} [{group.side_effect.value}] {', '.join(group.tool_names)}")
+        print(
+            f"  group {i}: {how:11} [{group.side_effect.value}] {', '.join(group.tool_names)}"
+        )
 
 
 def _on_pre(event: ToolCallPreEvent) -> None:
@@ -156,7 +160,9 @@ def _on_post(event: ToolCallPostEvent) -> None:
 
 
 async def main() -> None:
-    print(f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)...")
+    print(
+        f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
+    )
     llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
 
     # Two real specialist agents; the whole team shares one loaded model.

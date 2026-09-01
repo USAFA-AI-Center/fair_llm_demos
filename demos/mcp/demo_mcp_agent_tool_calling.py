@@ -45,19 +45,20 @@ PREREQUISITES:
    docker run -d -p 8080:8080 -e BRAVE_API_KEY="YOUR_KEY" \\
      --name brave-search-mcp shoofio/brave-search-mcp-sse:latest
 """
+
 import asyncio
 import os
 import sys
 
 from fairlib import (
     HuggingFaceAdapter,
+    MCPServerConfig,
+    SimpleAgent,
+    SimpleReActPlanner,
     ToolExecutor,
     WorkingMemory,
-    SimpleReActPlanner,
-    SimpleAgent,
-    MCPServerConfig,
 )
-from fairlib.core.prompts import PromptBuilder, RoleDefinition, Example
+from fairlib.core.prompts import Example, PromptBuilder, RoleDefinition
 
 # Default Brave Search SSE URL
 DEFAULT_BRAVE_SSE_URL = "http://localhost:8080/sse"
@@ -84,33 +85,37 @@ def create_research_agent_prompt_builder():
     # The SimpleReActPlanner will automatically merge its mandatory
     # format instructions, which use simple string tool_input.
 
-    builder.examples.append(Example(
-        "# Example - Web Search:\n"
-        "user: What are the latest AI trends?\n"
-        "assistant: "
-        "Thought: I need to search the web to find the latest AI trends.\n"
-        "Action:\n"
-        "tool_name: brave_brave-search_brave_web_search\n"
-        "tool_input: latest AI trends 2025\n"
-    ))
+    builder.examples.append(
+        Example(
+            "# Example - Web Search:\n"
+            "user: What are the latest AI trends?\n"
+            "assistant: "
+            "Thought: I need to search the web to find the latest AI trends.\n"
+            "Action:\n"
+            "tool_name: brave_brave-search_brave_web_search\n"
+            "tool_input: latest AI trends 2025\n"
+        )
+    )
 
-    builder.examples.append(Example(
-        "# Example - Reading a file:\n"
-        "user: What's in the README file?\n"
-        "assistant: "
-        "Thought: I need to read the README file to see its contents.\n"
-        "Action:\n"
-        "tool_name: fs_filesystem_read_file\n"
-        "tool_input: README.md\n"
-    ))
+    builder.examples.append(
+        Example(
+            "# Example - Reading a file:\n"
+            "user: What's in the README file?\n"
+            "assistant: "
+            "Thought: I need to read the README file to see its contents.\n"
+            "Action:\n"
+            "tool_name: fs_filesystem_read_file\n"
+            "tool_input: README.md\n"
+        )
+    )
 
     return builder
 
 
 async def setup_mcp_connections():
     """Set up both SSE (Brave Search) and stdio (filesystem) MCP connections."""
-    from fairlib.modules.mcp.client.mcp_tool_registry import MCPToolRegistry
     from fairlib.modules.action.tools.composite_registry import CompositeToolRegistry
+    from fairlib.modules.mcp.client.mcp_tool_registry import MCPToolRegistry
 
     print("\n" + "=" * 60)
     print("Setting up MCP Connections")
@@ -122,10 +127,7 @@ async def setup_mcp_connections():
     sse_url = os.environ.get("BRAVE_MCP_SSE_URL", DEFAULT_BRAVE_SSE_URL)
     try:
         brave_config = MCPServerConfig(
-            name="brave-search",
-            transport="sse",
-            url=sse_url,
-            timeout=30
+            name="brave-search", transport="sse", url=sse_url, timeout=30
         )
         brave_registry = MCPToolRegistry(tool_prefix="brave")
         await brave_registry.add_server(brave_config)
@@ -138,7 +140,9 @@ async def setup_mcp_connections():
         brave_registry = None
 
     # 2. Set up Filesystem via stdio
-    mcp_server_script = os.path.join(os.path.dirname(__file__), "mcp_filesystem_server.py")
+    mcp_server_script = os.path.join(
+        os.path.dirname(__file__), "mcp_filesystem_server.py"
+    )
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     try:
         fs_config = MCPServerConfig(
@@ -146,12 +150,12 @@ async def setup_mcp_connections():
             transport="stdio",
             command=sys.executable,
             args=[mcp_server_script, project_dir],
-            timeout=30
+            timeout=30,
         )
         fs_registry = MCPToolRegistry(tool_prefix="fs")
         await fs_registry.add_server(fs_config)
         tools = list(fs_registry.get_all_tools().keys())
-        print(f"[stdio] Filesystem connected")
+        print("[stdio] Filesystem connected")
         print(f"        Tools: {tools}")
         registries.append(fs_registry)
     except Exception as e:
@@ -212,8 +216,12 @@ async def main():
     combined_registry, brave_registry, fs_registry = await setup_mcp_connections()
 
     if not combined_registry:
-        print("\nERROR: No MCP servers available. Please start the Brave Search server:")
-        print("  docker run -d -p 8080:8080 -e BRAVE_API_KEY=... shoofio/brave-search-mcp-sse:latest")
+        print(
+            "\nERROR: No MCP servers available. Please start the Brave Search server:"
+        )
+        print(
+            "  docker run -d -p 8080:8080 -e BRAVE_API_KEY=... shoofio/brave-search-mcp-sse:latest"
+        )
         return
 
     # Show all available tools

@@ -70,7 +70,9 @@ def build_agent(llm, bus: AgentEventBus) -> SimpleAgent:
 
 
 async def main() -> None:
-    print(f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)...")
+    print(
+        f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
+    )
     llm = HuggingFaceAdapter(MODEL_NAME, stream=True, max_new_tokens=512)
 
     bus = AgentEventBus()
@@ -81,16 +83,20 @@ async def main() -> None:
     # stay distinguishable.
     def on_start(event: ModelStreamStartEvent) -> None:
         mode = "simulated" if event.simulated else "live"
-        print(f"\n--- stream {event.stream_id} started "
-              f"({event.source.value}, step={event.step}, {mode}) ---")
+        print(
+            f"\n--- stream {event.stream_id} started "
+            f"({event.source.value}, step={event.step}, {mode}) ---"
+        )
         print("raw feed: ", end="", flush=True)
 
     def on_chunk(event: ModelStreamChunkEvent) -> None:
         print(event.text, end="", flush=True)
 
     def on_end(event: ModelStreamEndEvent) -> None:
-        print(f"\n--- stream {event.stream_id} ended: {event.finish_reason.value}, "
-              f"{event.chunk_count} chunks, {event.total_chars} chars ---")
+        print(
+            f"\n--- stream {event.stream_id} ended: {event.finish_reason.value}, "
+            f"{event.chunk_count} chunks, {event.total_chars} chars ---"
+        )
 
     bus.subscribe(ModelStreamStartEvent, on_start)
     bus.subscribe(ModelStreamChunkEvent, on_chunk)
@@ -134,8 +140,10 @@ async def main() -> None:
 
     print(f"\nFiltered final-answer feed: {''.join(answer_parts)!r}")
     print(f"Returned final answer:      {answer!r}")
-    print("\nThe returned answer and the streamed turn came from the SAME "
-          "model call - streaming is a consumption mode, not a second run.")
+    print(
+        "\nThe returned answer and the streamed turn came from the SAME "
+        "model call - streaming is a consumption mode, not a second run."
+    )
 
 
 if __name__ == "__main__":

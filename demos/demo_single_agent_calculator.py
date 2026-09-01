@@ -17,14 +17,15 @@ collaboration, see `demo_advanced_calculator_calculus.py`.
 # We import everything needed to build a single agent from the ground up.
 from fairlib import (
     HuggingFaceAdapter,
-    ToolRegistry,
+    RoleDefinition,
     SafeCalculatorTool,
-    ToolExecutor,
-    WorkingMemory,
-    SimpleAgent, 
+    SimpleAgent,
     SimpleReActPlanner,
-    RoleDefinition
+    ToolExecutor,
+    ToolRegistry,
+    WorkingMemory,
 )
+
 
 async def main():
     """
@@ -41,12 +42,14 @@ async def main():
     # b) The "Toolbelt": The Tool Registry and Tools
     # The registry holds all the tools the agent can use.
     tool_registry = ToolRegistry()
-    
+
     # We create an instance of our safe calculator and register it.
     calculator_tool = SafeCalculatorTool()
     tool_registry.register_tool(calculator_tool)
-    
-    print(f"Agent's tools: {[tool.name for tool in tool_registry.get_all_tools().values()]}")
+
+    print(
+        f"Agent's tools: {[tool.name for tool in tool_registry.get_all_tools().values()]}"
+    )
 
     # c) The "Hands": The Tool Executor
     # This component is responsible for actually running the tool that the agent decides to use.
@@ -59,13 +62,12 @@ async def main():
     # e) The "Mind": The Planner
     # The SimpleReActPlanner is responsible for the agent's reasoning process. It takes
     # the user's request and the conversation history and decides what to do next.
-    
+
     # For use with simple, local models
     planner = SimpleReActPlanner(llm, tool_registry)
 
     # modify the default role a bit:
-    planner.prompt_builder.role_definition = \
-    RoleDefinition(
+    planner.prompt_builder.role_definition = RoleDefinition(
         "You are an expert mathematical calculator. Your job it is to perform mathematical calculations.\n"
         "You reason step-by-step to determine the best course of action. If a user's request requires "
         "multiple steps or tools, you must break it down and execute them sequentially. You must follow the strict formatting rules that follow..."
@@ -79,28 +81,31 @@ async def main():
         planner=planner,
         tool_executor=executor,
         memory=memory,
-        max_steps=10  # We give it a limit to prevent it from running forever.
+        max_steps=10,  # We give it a limit to prevent it from running forever.
     )
     print("Agent successfully created. You can now chat with the agent.")
-    print("Try asking it a math problem, like 'What is 45 * 11?' or 'What is the result of 1024 divided by 256?'. Type 'exit' to quit.")
+    print(
+        "Try asking it a math problem, like 'What is 45 * 11?' or 'What is the result of 1024 divided by 256?'. Type 'exit' to quit."
+    )
 
     # --- Step 4: Run the Interaction Loop ---
     # This loop allows you to have a continuous conversation with the agent.
     while True:
         try:
-            user_input = input("\n👤 You: ")
+            user_input = input("\nYou: ")
             if user_input.lower() in ["exit", "quit"]:
-                print("🤖 Agent: Goodbye!")
+                print("Agent: Goodbye!")
                 break
-            
+
             # This is the main call. The agent takes the input and runs its
             # entire Reason-Act loop to come up with a response.
             agent_response = await agent.arun(user_input)
             print(f"LLM Raw Output:\n{agent_response}")
-            print(f"🤖 Agent: {agent_response}")
+            print(f"Agent: {agent_response}")
 
-        except KeyboardInterrupt:
-            print("\n🤖 Agent: Exiting...")
+        except (EOFError, KeyboardInterrupt):
+            # End of piped input or Ctrl-C: the session is over.
+            print("\nAgent: Exiting...")
             break
 
 

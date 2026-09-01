@@ -1,0 +1,24 @@
+# Hardened settings for demo_mcp_hostile_server.py. Every value here is 0 or
+# off in the settings.yml fairlib ships with; this file turns the caps and
+# hygiene on so the same hostile server renders differently. Copy the
+# sections you want into your own settings.yml.
+api_keys: {}
+models:
+  default:
+    provider: huggingface
+    model_name: dolphin3-qwen25-3b
+default_model: default
+
+limits:
+  observation:
+    max_result_chars: 4000       # one tool result in the observation
+  mcp:
+    max_schema_text_chars: 300   # one schema property description
+    max_tool_name_chars: 64      # a server-declared tool name
+
+logging:
+  safe_logs: true
+
+text_hygiene:
+  strip_invisible: true
+  collapse_untrusted: true

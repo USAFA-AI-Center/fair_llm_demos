@@ -50,7 +50,6 @@ import asyncio
 import os
 from typing import Dict, List
 
-# --- Step 1: Import all necessary components ---
 from fairlib import (
     AgentCapability,
     BasicSecurityManager,
@@ -58,6 +57,7 @@ from fairlib import (
     FormatInstruction,
     GraphingTool,
     HuggingFaceAdapter,
+    MaxStepsExceeded,
     PromptBuilder,
     ReActPlanner,
     RoleDefinition,
@@ -92,20 +92,20 @@ AGENT: {capability.name}
 PRIMARY FUNCTION: {capability.primary_function}
 
 CAPABILITIES:
-{chr(10).join(f'- {cap}' for cap in capability.capabilities)}
+{chr(10).join(f"- {cap}" for cap in capability.capabilities)}
 
 LIMITATIONS:
-{chr(10).join(f'- {lim}' for lim in capability.limitations)}
+{chr(10).join(f"- {lim}" for lim in capability.limitations)}
 
 INPUT FORMAT: {capability.input_format}
 OUTPUT FORMAT: {capability.output_format}
 
-TOOLS AVAILABLE: {', '.join(capability.tools)}
+TOOLS AVAILABLE: {", ".join(capability.tools)}
 
 EXAMPLE TASKS THIS AGENT CAN HANDLE:
-{chr(10).join(f'- {task}' for task in capability.example_tasks)}
+{chr(10).join(f"- {task}" for task in capability.example_tasks)}
 
-KEYWORDS FOR DELEGATION: {', '.join(capability.delegation_keywords)}
+KEYWORDS FOR DELEGATION: {", ".join(capability.delegation_keywords)}
 """
         return description.strip()
 
@@ -119,13 +119,13 @@ RESEARCHER_CAPABILITY = AgentCapability(
         "Find current prices, news, and facts",
         "Locate data sources, APIs, and datasets",
         "Discover relevant URLs and documentation",
-        "Search for multiple related topics"
+        "Search for multiple related topics",
     ],
     limitations=[
         "Cannot extract data from URLs (only finds them)",
         "Cannot process or parse website content",
         "Cannot create visualizations",
-        "Returns search results, not extracted data"
+        "Returns search results, not extracted data",
     ],
     input_format="Natural language search queries",
     output_format="JSON array of search results with titles, URLs, and snippets",
@@ -134,10 +134,19 @@ RESEARCHER_CAPABILITY = AgentCapability(
         "Search for climate data sources",
         "Locate NASA temperature datasets",
         "Find stock market information",
-        "Search for scientific research papers"
+        "Search for scientific research papers",
     ],
-    delegation_keywords=["search", "find", "locate", "discover", "look up", "current", "latest", "real-time"],
-    tools=["web_searcher"]
+    delegation_keywords=[
+        "search",
+        "find",
+        "locate",
+        "discover",
+        "look up",
+        "current",
+        "latest",
+        "real-time",
+    ],
+    tools=["web_searcher"],
 )
 
 DATA_EXTRACTOR_CAPABILITY = AgentCapability(
@@ -151,13 +160,13 @@ DATA_EXTRACTOR_CAPABILITY = AgentCapability(
         "Parse CSV, JSON, Excel, PDF formats automatically",
         "Use LLM to extract data from unstructured pages",
         "Try multiple strategies until actual data is found",
-        "Handle any data domain (finance, climate, sports, etc.)"
+        "Handle any data domain (finance, climate, sports, etc.)",
     ],
     limitations=[
         "Cannot search for new URLs (needs URLs from Researcher)",
         "Cannot create visualizations",
         "May require multiple attempts for complex sources",
-        "Some sites may require authentication"
+        "Some sites may require authentication",
     ],
     input_format="JSON array of search results with titles, URLs, and snippets",
     output_format="Structured data with actual values, metadata about extraction strategies used",
@@ -167,10 +176,19 @@ DATA_EXTRACTOR_CAPABILITY = AgentCapability(
         "Pull statistics from government databases",
         "Extract sports scores from results pages",
         "Get economic indicators from central banks",
-        "Parse research data from academic sources"
+        "Parse research data from academic sources",
     ],
-    delegation_keywords=["extract", "get data", "fetch", "download", "parse", "retrieve", "pull data", "obtain values"],
-    tools=["web_data_extractor"]
+    delegation_keywords=[
+        "extract",
+        "get data",
+        "fetch",
+        "download",
+        "parse",
+        "retrieve",
+        "pull data",
+        "obtain values",
+    ],
+    tools=["web_data_extractor"],
 )
 
 GRAPHER_CAPABILITY = AgentCapability(
@@ -183,13 +201,13 @@ GRAPHER_CAPABILITY = AgentCapability(
         "Add professional styling and annotations",
         "Save high-resolution plots",
         "Process custom visualization instructions",
-        "Accept multiple data formats (columns/rows, separate arrays, etc.)"
+        "Accept multiple data formats (columns/rows, separate arrays, etc.)",
     ],
     limitations=[
         "Requires structured data",
         "Cannot search or extract data",
         "Cannot analyze plot meaning",
-        "Needs data from DataExtractor agent"
+        "Needs data from DataExtractor agent",
     ],
     input_format="Structured data JSON (flexible formats accepted: {'columns': [...], 'rows': [...]}, {'x': [...], 'y': [...]}, or {'field1': [...], 'field2': [...]})",
     output_format="Plot metadata including file path and visualization details",
@@ -199,10 +217,18 @@ GRAPHER_CAPABILITY = AgentCapability(
         "Visualize data trends",
         "Generate scatter plot of correlations",
         "Make bar chart comparing categories",
-        "Plot months vs anomalies data"
+        "Plot months vs anomalies data",
     ],
-    delegation_keywords=["plot", "graph", "visualize", "chart", "diagram", "draw", "create visualization"],
-    tools=["graphing_tool"]
+    delegation_keywords=[
+        "plot",
+        "graph",
+        "visualize",
+        "chart",
+        "diagram",
+        "draw",
+        "create visualization",
+    ],
+    tools=["graphing_tool"],
 )
 
 
@@ -218,7 +244,9 @@ class EnhancedManagerPromptBuilder:
     """
 
     @staticmethod
-    def create_delegation_rules_as_role(capabilities: Dict[str, AgentCapability]) -> RoleDefinition:
+    def create_delegation_rules_as_role(
+        capabilities: Dict[str, AgentCapability],
+    ) -> RoleDefinition:
         """Create delegation rules as an enhanced role definition"""
 
         role_text = """You are a Manager Agent responsible for coordinating specialized worker agents to complete complex tasks. Each worker is available to you as a tool: calling the tool delegates a subtask to that worker and the observation is the worker's final answer.
@@ -274,12 +302,14 @@ def enhance_manager_prompt_builder(
 # example is the planner's mandatory JSON shape: one object with a
 # 'thought' string and an 'actions' array of {tool_name, tool_input}.
 
+
 def add_generic_data_extraction_examples(prompt_builder: PromptBuilder):
     """Add generic examples that work for any data extraction scenario"""
 
     # Example 1: Handling API documentation generically, with persistence
-    prompt_builder.examples.append(Example(
-        """User Request: Get data about [any topic]
+    prompt_builder.examples.append(
+        Example(
+            """User Request: Get data about [any topic]
 
 {"thought": "The user wants data about [topic]. Extraction depends on URLs I do not have yet, so this turn is a single search delegation.", "actions": [{"tool_name": "Researcher", "tool_input": "search for [topic] data download CSV JSON API statistics dataset"}]}
 
@@ -290,11 +320,13 @@ Observation: [Researcher] [{"title": "Data Source", "url": "https://example.com/
 Observation: [DataExtractor] {"status": "partial", "data_found": false, "documentation_found": [{"columns": ["parameter", "type"], "rows": ["..."]}], "extraction_strategies": ["Direct fetch", "Analyzing content", "Searching for data links"]}
 
 {"thought": "The DataExtractor found documentation but not actual data. Let me search for more direct data sources or specific file downloads.", "actions": [{"tool_name": "Researcher", "tool_input": "search for [topic] data direct download filetype:csv OR filetype:json OR filetype:xlsx raw data"}]}"""
-    ))
+        )
+    )
 
     # Example 2: Successfully extracting data and plotting it
-    prompt_builder.examples.append(Example(
-        """User Request: Show me a chart of [any metric]
+    prompt_builder.examples.append(
+        Example(
+            """User Request: Show me a chart of [any metric]
 
 {"thought": "I need to find data about [metric] to create a chart. Let me search for data sources.", "actions": [{"tool_name": "Researcher", "tool_input": "search for [metric] data statistics historical current values download"}]}
 
@@ -305,11 +337,13 @@ Observation: [Researcher] [{"url": "https://data.example.com/metrics"}]
 Observation: [DataExtractor] {"status": "success", "data_found": true, "extracted_data": [{"columns": ["period", "value"], "rows": [["2023-Q1", "42.5"], ["2023-Q2", "45.1"]], "data_type": "time_series"}]}
 
 {"thought": "I have the data. Now I will create a visualization.", "actions": [{"tool_name": "Grapher", "tool_input": "Create an appropriate chart for this [metric] data. Choose the best visualization type based on the data structure."}]}"""
-    ))
+        )
+    )
 
     # Example 3: Completing the pipeline and finishing
-    prompt_builder.examples.append(Example(
-        """User Request: Analyze [topic] trends
+    prompt_builder.examples.append(
+        Example(
+            """User Request: Analyze [topic] trends
 
 {"thought": "To analyze trends, I need historical data about [topic]. Let me search for comprehensive datasets.", "actions": [{"tool_name": "Researcher", "tool_input": "search for [topic] historical data trends over time statistics database"}]}
 
@@ -324,7 +358,8 @@ Observation: [DataExtractor] {"status": "success", "data_found": true, "extracte
 Observation: [Grapher] {"status": "success", "plot_metadata": {"file_path": "./outputs/plot_trends.png"}}
 
 {"thought": "I have completed the full analysis with data and a visualization.", "actions": [{"tool_name": "final_answer", "tool_input": "I've analyzed the [topic] trends: [summary]. The visualization has been saved as 'plot_trends.png' and shows [key visual insights]. The data reveals [main patterns and conclusions]."}]}"""
-    ))
+        )
+    )
 
 
 def add_generic_manager_guidance(prompt_builder: PromptBuilder):
@@ -386,15 +421,20 @@ def create_worker(
         planner=planner,
         tool_executor=executor,
         memory=memory,
-        stateless=stateless
+        stateless=stateless,
     )
 
 
 # --- Step 5: Main Function ---
 async def main():
     # check if the web search tool can be used
-    if not settings.search_engine.google_cse_search_api or not settings.search_engine.google_cse_search_engine_id:
-        print("A google search engine API key as well as search engine ID needs to be set to run this demo. Exiting...")
+    if (
+        not settings.search_engine.google_cse_search_api
+        or not settings.search_engine.google_cse_search_engine_id
+    ):
+        print(
+            "A google search engine API key as well as search engine ID needs to be set to run this demo. Exiting..."
+        )
         return
 
     print("Initializing fairlib.core.components...")
@@ -419,14 +459,22 @@ async def main():
     researcher = create_worker(llm, [WebSearcherTool(config=web_search_config)])
 
     data_extractor = create_worker(
-        llm, [WebDataExtractor(llm=llm, security_manager=BasicSecurityManager.from_settings(settings))]
+        llm,
+        [
+            WebDataExtractor(
+                llm=llm, security_manager=BasicSecurityManager.from_settings(settings)
+            )
+        ],
     )
 
-    grapher = create_worker(llm, [GraphingTool(
-        security_manager=BasicSecurityManager(),
-        llm=llm,
-        output_dir="./outputs"
-    )])
+    grapher = create_worker(
+        llm,
+        [
+            GraphingTool(
+                security_manager=BasicSecurityManager(), llm=llm, output_dir="./outputs"
+            )
+        ],
+    )
 
     # Wrap each worker as a typed tool. The capability-derived description
     # is what the manager model reads in its rendered tool catalog.
@@ -440,13 +488,17 @@ async def main():
         WorkerAgentTool(
             researcher,
             name="Researcher",
-            description=AgentDescriptionBuilder.build_description(RESEARCHER_CAPABILITY),
+            description=AgentDescriptionBuilder.build_description(
+                RESEARCHER_CAPABILITY
+            ),
             side_effect=SideEffect.READ_ONLY,
         ),
         WorkerAgentTool(
             data_extractor,
             name="DataExtractor",
-            description=AgentDescriptionBuilder.build_description(DATA_EXTRACTOR_CAPABILITY),
+            description=AgentDescriptionBuilder.build_description(
+                DATA_EXTRACTOR_CAPABILITY
+            ),
             side_effect=SideEffect.READ_ONLY,
         ),
         WorkerAgentTool(
@@ -472,8 +524,9 @@ async def main():
     add_generic_data_extraction_examples(prompt_builder)
 
     # Add a full worked example of the complete pipeline
-    prompt_builder.examples.append(Example(
-        """User Request: Find the price of bitcoin over the past 5 years and plot the data.
+    prompt_builder.examples.append(
+        Example(
+            """User Request: Find the price of bitcoin over the past 5 years and plot the data.
 
 {"thought": "The user wants historical bitcoin price data and a visualization. This requires: 1) researching data sources, 2) extracting the actual data, 3) creating a plot. Extraction depends on the search results, so I start with a single delegation to the Researcher.", "actions": [{"tool_name": "Researcher", "tool_input": "Search for reliable sources of bitcoin price history over the past 5 years (2019-2024). Find APIs or datasets with daily/weekly price data."}]}
 
@@ -488,7 +541,8 @@ Observation: [DataExtractor] {"status": "success", "extracted_data": [{"source_u
 Observation: [Grapher] {"status": "success", "plot_metadata": {"file_path": "./outputs/plot_20240627_103045.png", "file_name": "plot_20240627_103045.png", "plot_type": "line", "title": "Bitcoin Price History (2019-2024)"}, "data_analysis": {"suggested_plot_type": "line", "has_time_series": true, "num_rows": 1827}}
 
 {"thought": "I have coordinated all workers to complete the task. The Researcher found data sources, the DataExtractor retrieved the price history, and the Grapher created a visualization. I can now provide the final answer.", "actions": [{"tool_name": "final_answer", "tool_input": "I've analyzed bitcoin's price over the past 5 years and created a visualization. Starting at $3,747 (Jan 2019), it reached an all-time high of $69,000 (Nov 2021) before crashing to $17,600 (June 2022); current price ~$42,265, a 1,028% gain over 5 years. I've created a line plot saved as 'plot_20240627_103045.png' covering 1,827 daily price points on a logarithmic scale, which highlights the 2020-2021 bull run, the 2022 bear market, and the 2023-2024 recovery."}]}"""
-    ))
+        )
+    )
 
     # The manager is a plain SimpleAgent over the worker tools: no
     # dedicated orchestrator class, no separate runner. Multi-worker
@@ -505,16 +559,23 @@ Observation: [Grapher] {"status": "success", "plot_metadata": {"file_path": "./o
     # Test query
     user_query = "I want to generate a plot showing the temperature of the earth over the last 10 years."
 
-    print(f"\n{'='*100}")
+    print(f"\n{'=' * 100}")
     print(f"User Query: {user_query}")
-    print(f"{'='*100}\n")
+    print(f"{'=' * 100}\n")
 
-    final_answer = await manager.arun(user_query)
+    try:
+        final_answer = await manager.arun(user_query)
+    except MaxStepsExceeded as exc:
+        # Without a working search key or reachable data sources the
+        # workers never produce an answer; that is the agent's typed
+        # signal, not a crash.
+        print(f"\nThe manager ran out of steps before answering: {exc}")
+        return
 
     # Display the final result
     print("\n--- FINAL Synthesized Answer ---")
     print(final_answer)
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
 
 
 if __name__ == "__main__":

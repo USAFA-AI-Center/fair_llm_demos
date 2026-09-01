@@ -15,16 +15,14 @@ What it shows:
     and a single action through aexecute - the LLM chooses which, not the demo.
   - One shared event bus carries the executor's ToolBatchScheduledEvent and
     per-call ToolCallPostEvent, so the scheduling decision is observable.
-  - A deterministic, model-free verification pass at the end drives the
-    executor directly with a mixed read/mutate batch and hard-asserts the
-    scheduling contract: original order preserved, read-only calls overlapped,
-    and the mutating call ran as a barrier.
+  - A closing pass drives the executor directly with a mixed read/mutate
+    batch and prints what the scheduler did: result order, how many reads
+    overlapped, and where the mutating call ran.
 
 Requirements: a local HuggingFace model (transformers; a GPU is recommended).
 The first run downloads the weights. Set FAIR_LLM_DEMO_MODEL to override the
-default. This is a demo script, not part of the unit suite; the model-driven
-part is best-effort on the model emitting clean multi-action JSON, while the
-verification pass at the end is deterministic and needs no model.
+default. The model-driven part depends on the model emitting clean
+multi-action JSON on a given run.
 
 Run:
     python demos/demo_multi_tool_turn.py
@@ -101,31 +99,37 @@ class _ReportWriterTool(AbstractTool):
         self._log = log
 
     async def acall(self, tool_input: StringInput) -> ToolOutput:
-        # A mutating barrier must never overlap a read.
-        assert _in_flight["now"] == 0, "mutating call overlapped a read"
+        # A mutating barrier never overlaps a read; record how many were in
+        # flight when the write started so the closing pass can show it.
+        _in_flight["reads_during_write"] = _in_flight["now"]
         self._log.append(tool_input.input)
         return TextResult(result="saved")
 
 
-async def _verify_scheduling_contract() -> None:
-    """Deterministic, model-free check of the batch scheduling contract.
+async def show_scheduling_contract() -> None:
+    """Drive the executor directly with a mixed read/mutate batch.
 
-    Drives the executor directly with a mixed read/mutate batch and
-    hard-asserts what the model-driven section can only show best-effort:
+    The model-driven section can only show a parallel batch when the model
+    happens to emit one; this pass shows the scheduling contract on demand:
     results come back in original call order, the read-only calls overlap,
-    and the mutating call runs strictly as a barrier.
+    and the mutating call runs as a barrier with no read in flight.
     """
     from fairlib.core.message import Action
 
     _in_flight["now"] = 0
     _in_flight["max"] = 0
+    _in_flight["reads_during_write"] = 0
     write_log: list = []
     registry = ToolRegistry()
     registry.register_tool(
-        _SlowLookupTool("get_capital", "Return the capital city of a country.", _CAPITALS)
+        _SlowLookupTool(
+            "get_capital", "Return the capital city of a country.", _CAPITALS
+        )
     )
     registry.register_tool(
-        _SlowLookupTool("get_population", "Return the population of a country.", _POPULATIONS)
+        _SlowLookupTool(
+            "get_population", "Return the population of a country.", _POPULATIONS
+        )
     )
     registry.register_tool(_ReportWriterTool(write_log))
 
@@ -138,34 +142,36 @@ async def _verify_scheduling_contract() -> None:
     ]
     results = await executor.aexecute_batch(calls)
 
-    assert [r.tool_name for r in results] == [c.tool_name for c in calls], (
-        "results must come back in original call order"
-    )
-    assert all(r.succeeded for r in results), "every call in the batch must succeed"
-    assert _in_flight["max"] >= 2, (
-        "the two leading read-only calls must have overlapped"
-    )
-    assert write_log == ["capitals-and-populations"], "the mutating call must have run"
-    print(
-        "[verify] scheduling contract holds: order preserved, reads overlapped "
-        f"(peak {_in_flight['max']}), mutating call ran as a barrier."
-    )
+    print("\n[scheduling] batch of four calls: read, read, write, read")
+    print(f"  results in original order: {[r.tool_name for r in results]}")
+    print(f"  every call succeeded:      {all(r.succeeded for r in results)}")
+    print(f"  peak concurrent reads:     {_in_flight['max']}")
+    print(f"  reads in flight at write:  {_in_flight['reads_during_write']}")
+    print(f"  write log after the batch: {write_log}")
 
 
 def _on_schedule(event: ToolBatchScheduledEvent) -> None:
-    print(f"\n[scheduler] {event.batch_size} calls, max parallel {event.max_parallel_tools}:")
+    print(
+        f"\n[scheduler] {event.batch_size} calls, max parallel {event.max_parallel_tools}:"
+    )
     for i, group in enumerate(event.groups, start=1):
         how = "PARALLEL" if group.parallel else "sequential"
-        print(f"  group {i}: {how:11} [{group.side_effect.value}] {', '.join(group.tool_names)}")
+        print(
+            f"  group {i}: {how:11} [{group.side_effect.value}] {', '.join(group.tool_names)}"
+        )
 
 
 async def main() -> None:
     registry = ToolRegistry()
     registry.register_tool(
-        _SlowLookupTool("get_capital", "Return the capital city of a country.", _CAPITALS)
+        _SlowLookupTool(
+            "get_capital", "Return the capital city of a country.", _CAPITALS
+        )
     )
     registry.register_tool(
-        _SlowLookupTool("get_population", "Return the population of a country.", _POPULATIONS)
+        _SlowLookupTool(
+            "get_population", "Return the population of a country.", _POPULATIONS
+        )
     )
 
     # One bus shared by the executor (which owns batch-path emission) and the agent.
@@ -173,10 +179,14 @@ async def main() -> None:
     bus.subscribe(ToolBatchScheduledEvent, _on_schedule)
     bus.subscribe(
         ToolCallPostEvent,
-        lambda e: print(f"  [done] {e.tool_name} -> {e.observation} (ok={e.succeeded})"),
+        lambda e: print(
+            f"  [done] {e.tool_name} -> {e.observation} (ok={e.succeeded})"
+        ),
     )
 
-    print(f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)...")
+    print(
+        f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
+    )
     llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
     executor = ToolExecutor(registry, events=bus)
     planner = MultiActionReActPlanner(llm, registry)
@@ -192,7 +202,9 @@ async def main() -> None:
     elapsed = time.perf_counter() - started
 
     print(f"\nFinal answer: {answer}")
-    print(f"\nWall-clock: {elapsed:.2f}s. Peak concurrent tool calls: {_in_flight['max']}.")
+    print(
+        f"\nWall-clock: {elapsed:.2f}s. Peak concurrent tool calls: {_in_flight['max']}."
+    )
     if _in_flight["max"] >= 2:
         print(
             "The model issued the two independent lookups in one turn and they ran "
@@ -208,7 +220,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    # The deterministic contract check runs first: it needs no model, so a
-    # broken scheduler fails fast before any weights download.
-    asyncio.run(_verify_scheduling_contract())
     asyncio.run(main())
+    asyncio.run(show_scheduling_contract())

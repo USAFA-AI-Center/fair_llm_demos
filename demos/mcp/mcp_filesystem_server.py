@@ -13,6 +13,7 @@ Usage:
 
 The server runs via stdio and can be used with any MCP client.
 """
+
 import asyncio
 import os
 import sys
@@ -22,7 +23,7 @@ from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
 
 def create_filesystem_server(allowed_directory: str) -> Server:
@@ -75,11 +76,11 @@ def create_filesystem_server(allowed_directory: str) -> Server:
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Directory path to list (relative or absolute within allowed area). Use '.' for current directory."
+                            "description": "Directory path to list (relative or absolute within allowed area). Use '.' for current directory.",
                         }
                     },
-                    "required": ["path"]
-                }
+                    "required": ["path"],
+                },
             ),
             Tool(
                 name="read_file",
@@ -93,15 +94,15 @@ def create_filesystem_server(allowed_directory: str) -> Server:
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Path to the file to read"
+                            "description": "Path to the file to read",
                         },
                         "max_lines": {
                             "type": "integer",
-                            "description": "Maximum number of lines to read (default: 100)"
-                        }
+                            "description": "Maximum number of lines to read (default: 100)",
+                        },
                     },
-                    "required": ["path"]
-                }
+                    "required": ["path"],
+                },
             ),
             Tool(
                 name="get_file_info",
@@ -114,12 +115,12 @@ def create_filesystem_server(allowed_directory: str) -> Server:
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Path to the file or directory"
+                            "description": "Path to the file or directory",
                         }
                     },
-                    "required": ["path"]
-                }
-            )
+                    "required": ["path"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -155,9 +156,16 @@ async def handle_list_directory(arguments: dict, resolve_path) -> list[TextConte
     for entry in sorted(dir_path.iterdir()):
         entry_type = "dir" if entry.is_dir() else "file"
         size = entry.stat().st_size if entry.is_file() else 0
-        entries.append(f"  [{entry_type}] {entry.name}" + (f" ({size} bytes)" if entry.is_file() else ""))
+        entries.append(
+            f"  [{entry_type}] {entry.name}"
+            + (f" ({size} bytes)" if entry.is_file() else "")
+        )
 
-    result = f"Contents of {dir_path}:\n" + "\n".join(entries) if entries else f"Directory {dir_path} is empty"
+    result = (
+        f"Contents of {dir_path}:\n" + "\n".join(entries)
+        if entries
+        else f"Directory {dir_path} is empty"
+    )
     return [TextContent(type="text", text=result)]
 
 
@@ -178,7 +186,7 @@ async def handle_read_file(arguments: dict, resolve_path) -> list[TextContent]:
         return [TextContent(type="text", text=f"Not a file: {path}")]
 
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             lines = []
             for i, line in enumerate(f):
                 if i >= max_lines:
@@ -187,7 +195,9 @@ async def handle_read_file(arguments: dict, resolve_path) -> list[TextContent]:
                 lines.append(line.rstrip())
 
         content = "\n".join(lines)
-        return [TextContent(type="text", text=f"Contents of {file_path.name}:\n\n{content}")]
+        return [
+            TextContent(type="text", text=f"Contents of {file_path.name}:\n\n{content}")
+        ]
     except UnicodeDecodeError:
         return [TextContent(type="text", text=f"Error: {path} is not a text file")]
 
@@ -221,7 +231,10 @@ async def handle_get_file_info(arguments: dict, resolve_path) -> list[TextConten
 async def main():
     """Main entry point for the MCP server."""
     if len(sys.argv) < 2:
-        print("Usage: python mcp_filesystem_server.py <allowed_directory>", file=sys.stderr)
+        print(
+            "Usage: python mcp_filesystem_server.py <allowed_directory>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     allowed_directory = sys.argv[1]
@@ -234,9 +247,7 @@ async def main():
 
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options()
+            read_stream, write_stream, server.create_initialization_options()
         )
 
 

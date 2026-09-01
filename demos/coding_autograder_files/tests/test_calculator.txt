@@ -3,7 +3,7 @@ import sys
 import os
 
 # Import the student's code (will be dynamically loaded)
-from temp_student_code import add, subtract, multiply, divide, power
+from student_code import add, subtract, multiply, divide, power
 
 class TestCalculatorFunctions:
     """Test suite for calculator assignment"""

@@ -71,14 +71,16 @@ async def main() -> None:
         live_result = await live_agent.arun("Calculate 7 * 6.")
         print("Live result:", live_result)
 
-        # Persist while still marked running — simulates a crash mid-session.
+        # Persist while still marked running - simulates a crash mid-session.
         registry.persist(
             "classroom-demo",
             metadata={"course": "math142", "stage": "pre-crash"},
             status=SessionStatus.RUNNING,
         )
         interrupted = store.recover_interrupted_sessions()
-        print("\nInterrupted sessions after restart:", [r.session_id for r in interrupted])
+        print(
+            "\nInterrupted sessions after restart:", [r.session_id for r in interrupted]
+        )
 
         # --- Recovery: hydrate a brand-new agent from disk ---
         print(f"\nLoading {MODEL_NAME} for the recovered session...")

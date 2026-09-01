@@ -19,17 +19,17 @@ import tempfile
 from pathlib import Path
 
 from fairlib import (
-    HuggingFaceAdapter,
-    ToolRegistry,
-    ToolExecutor,
-    WorkingMemory,
-    SimpleAgent,
-    SimpleReActPlanner,
-    RoleDefinition,
     GlobTool,
     GrepTool,
+    HuggingFaceAdapter,
     ListDirTool,
     ReadFileTool,
+    RoleDefinition,
+    SimpleAgent,
+    SimpleReActPlanner,
+    ToolExecutor,
+    ToolRegistry,
+    WorkingMemory,
 )
 
 # The local model that drives the search
@@ -51,14 +51,10 @@ FIXTURE_FILES = {
         "    return subtotal + tax + shipping\n"
     ),
     "billing/discounts.py": (
-        "def apply_coupon(total, percent):\n"
-        "    return total * (1 - percent / 100)\n"
+        "def apply_coupon(total, percent):\n    return total * (1 - percent / 100)\n"
     ),
     "catalog/products.py": (
-        "PRODUCTS = {\n"
-        '    "widget": 9.99,\n'
-        '    "gadget": 14.50,\n'
-        "}\n"
+        'PRODUCTS = {\n    "widget": 9.99,\n    "gadget": 14.50,\n}\n'
     ),
     "notes.txt": "Remember to revisit the tax rate before launch.\n",
 }
@@ -93,7 +89,9 @@ def build_fixture(root: Path) -> None:
 async def main():
     # The local model. max_new_tokens gives each step room for a thought and a
     # single action without inviting the model to spill the whole loop at once.
-    print(f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)...")
+    print(
+        f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
+    )
     llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -103,13 +101,18 @@ async def main():
         # Every file tool is confined to the fixture root granted here. The
         # agent can navigate freely inside it and cannot reach anything above it.
         registry = ToolRegistry()
-        for tool in (ListDirTool(root), GlobTool(root), GrepTool(root), ReadFileTool(root)):
+        for tool in (
+            ListDirTool(root),
+            GlobTool(root),
+            GrepTool(root),
+            ReadFileTool(root),
+        ):
             registry.register_tool(tool)
         print(f"Tools: {[name for name in registry.get_all_tools()]}")
         print(f"Search root: {root}\n")
 
         executor = ToolExecutor(registry)
-        
+
         planner = SimpleReActPlanner(llm, registry)
         planner.prompt_builder.role_definition = RoleDefinition(
             "You are a codebase navigator. You answer questions about a project "

@@ -31,7 +31,12 @@ from fairlib import (
     ToolRegistry,
     WorkingMemory,
 )
-from fairlib.core.interfaces.tools import AbstractTool, SideEffect, TextResult, ToolOutput
+from fairlib.core.interfaces.tools import (
+    AbstractTool,
+    SideEffect,
+    TextResult,
+    ToolOutput,
+)
 
 MODEL_NAME = os.getenv("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
 

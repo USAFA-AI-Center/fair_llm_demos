@@ -71,6 +71,7 @@ PREREQUISITES:
 RUN:
     python demos/mcp/demo_multi_agent_research_team.py
 """
+
 import asyncio
 import os
 import sys
@@ -80,95 +81,45 @@ from typing import Dict, List, Optional, Tuple
 # ==============================================================================
 # SECTION 1: THE FAIRLIB IMPORT CATALOG
 # ==============================================================================
-# Everything below can be imported directly from fairlib. This single import
-# point is powered by lazy-loading (see fairlib/__init__.py)
-#
-# We organize them here by category so you can see the full toolkit at a glance.
-
-# --- 1a. Configuration ---
-# settings is a validated Pydantic object loaded from fairlib/config/settings.yml.
-# It gives you access to API keys, model configs, search engine settings, etc.
-from fairlib import settings
-
-# --- 1b. Core Data Types ---
-# These are the fundamental data structures that flow through every component.
-# Message is the universal currency of communication between agents and LLMs.
-# Thought, Action, Observation, FinalAnswer are the ReAct loop primitives.
-# Document is used in RAG pipelines for chunked text with metadata.
-
-# --- 1c. Prompt Engineering ---
-# The PromptBuilder system lets you construct structured prompts from composable
-# pieces. Each piece is a PromptItem subclass that renders to a string.
-# RoleDefinition states who the agent is; the planner merges its own mandatory
-# format instructions on top, so application prompt content stays declarative.
-from fairlib import PromptBuilder, RoleDefinition
-
-# --- 1d. Agent Classes ---
-# SimpleAgent is the core ReAct agent that thinks, acts, and observes in a loop.
-# WorkerAgentTool wraps any agent as a typed tool a manager can call.
-# build_worker_manager wires a fan-out manager as a plain SimpleAgent whose
-# tools are the workers.
-from fairlib import SimpleAgent, WorkerAgentTool, build_worker_manager
-
-# --- 1e. Planners ---
-# Planners are the "brain" — they take history and produce the next Thought+Action.
-# ReActPlanner       - Standard planner using JSON format (for capable models)
-# SimpleReActPlanner - Lightweight planner using text key-value format (for small models)
-# The manager's batch-capable MultiActionReActPlanner is constructed for us
-# inside build_worker_manager; we never instantiate it here.
-from fairlib import ReActPlanner, SimpleReActPlanner
-
-# --- 1f. Memory ---
-# Memory systems store conversation history and retrieved context.
-# WorkingMemory is short-term, in-context memory (most common for demos).
-# LongTermMemory is RAG-backed memory using a vector store + retriever.
-from fairlib import WorkingMemory
-
-# --- 1g. Model Abstraction Layer (MAL) ---
-# The MAL lets you swap LLM providers without changing any agent code.
-# Each adapter conforms to the same AbstractChatModel interface.
-#   OpenAIAdapter      - GPT-4, GPT-3.5, etc.
-#   AnthropicAdapter   - Claude 3, Claude 3.5, etc.
-#   HuggingFaceAdapter - Local transformer models (v4 AND v5 compatible)
-#   OllamaAdapter      - Local Ollama models
-#   LoadBalancerAdapter - Distributes requests across multiple adapters
-from fairlib import HuggingFaceAdapter
-
-# --- 1h. Tool Components ---
-# Tools give agents the ability to interact with the world.
-# ToolRegistry holds a collection of tools.
-# ToolExecutor runs tools by name and returns results.
-from fairlib import ToolRegistry, ToolExecutor
-
-# --- 1i. Built-in Tools ---
-# Ready-to-use tools that ship with fairlib.
-#   SafeCalculatorTool  - AST-based safe math evaluation
-#   AdvancedCalculusTool - Calculus operations (integrals, derivatives)
-#   WebSearcherTool     - Google Custom Search Engine integration
-#   WeatherTool         - Weather data retrieval
-#   GraphingTool        - Creates matplotlib visualizations
-#   WebDataExtractor    - Structured data extraction from web pages
-#   CodeExecutionTool   - Sandboxed Python code execution
-#   KnowledgeBaseQueryTool - RAG query interface
-#   GradeEssayFromRubricTool  - Essay autograding
-#   GradeCodeFromRubricTool   - Code autograding
-from fairlib import SafeCalculatorTool, WebSearcherTool
-
-# --- 1j. MCP (Model Context Protocol) ---
-# MCP lets your agents use tools hosted on EXTERNAL servers.
-# This is the key to INTEROPERABILITY — you can plug in anyone's tools.
-#   MCPClient          - Low-level connection to an MCP server
-#   MCPToolAdapter     - Wraps an MCP tool to look like a local AbstractTool
-#   MCPToolRegistry    - Manages tools from multiple MCP servers
-#   MCPServerConfig    - Pydantic config for connecting to an MCP server
-#   CompositeToolRegistry - Merges local tools + MCP tools into one registry
-from fairlib import MCPServerConfig, CompositeToolRegistry
-
-# --- 1k. Observability ---
-# Every step of the manager's loop emits typed events on a shared bus.
-# Subscribing is how consumers observe the system; nothing is inferred by
-# string-matching output.
-from fairlib import AgentEventBus
+# Everything in this block comes from the fairlib root, which lazy-loads each
+# name on first access (see fairlib/__init__.py). What each one is for:
+#   settings                  - the validated AppSettings loaded from settings.yml
+#   PromptBuilder, RoleDefinition - declarative prompt content; the planner
+#                               merges its own mandatory format rules on top
+#   SimpleAgent               - the ReAct agent: think, act, observe, repeat
+#   WorkerAgentTool           - wraps any agent as a typed tool a manager calls
+#   build_worker_manager      - wires a fan-out manager (a plain SimpleAgent over
+#                               MultiActionReActPlanner) from worker tools
+#   ReActPlanner              - JSON-format planner for capable models
+#   SimpleReActPlanner        - key-value planner for small local models
+#   WorkingMemory             - short-term, in-context memory
+#   HuggingFaceAdapter        - one MAL adapter; every adapter implements
+#                               AbstractChatModel, so the provider is swappable
+#   ToolRegistry, ToolExecutor - hold tools; run them by name
+#   SafeCalculatorTool, WebSearcherTool - built-in tools the workers use
+#   MCPServerConfig, CompositeToolRegistry - connect an external MCP server and
+#                               merge its tools with the local ones
+#   AgentEventBus             - the typed event bus every step reports on;
+#                               subscribing is how consumers observe the system
+from fairlib import (
+    AgentEventBus,
+    CompositeToolRegistry,
+    HuggingFaceAdapter,
+    MCPServerConfig,
+    PromptBuilder,
+    ReActPlanner,
+    RoleDefinition,
+    SafeCalculatorTool,
+    SimpleAgent,
+    SimpleReActPlanner,
+    ToolExecutor,
+    ToolRegistry,
+    WebSearcherTool,
+    WorkerAgentTool,
+    WorkingMemory,
+    build_worker_manager,
+    settings,
+)
 from fairlib.core.events import (
     ToolBatchScheduledEvent,
     ToolCallPostEvent,
@@ -183,10 +134,10 @@ from fairlib.core.events import (
 from fairlib.core.interfaces.tools import SideEffect
 from fairlib.core.message import OBSERVATION_PREFIX
 
-
 # ==============================================================================
 # SECTION 2: HELPER FUNCTIONS
 # ==============================================================================
+
 
 def print_section(title: str, width: int = 70):
     """Print a formatted section header."""
@@ -207,7 +158,7 @@ async def setup_brave_search_mcp(url: Optional[str] = None):
 
     This demonstrates using someone ELSE's tool through MCP.
     The Brave Search server is a Docker container that exposes web search
-    as an MCP tool — our agent doesn't need to know anything about the
+    as an MCP tool - our agent doesn't need to know anything about the
     Brave API; it just sends a search query and gets results back.
 
     Returns:
@@ -219,10 +170,7 @@ async def setup_brave_search_mcp(url: Optional[str] = None):
         from fairlib.modules.mcp.client.mcp_tool_registry import MCPToolRegistry
 
         mcp_config = MCPServerConfig(
-            name="brave-search",
-            transport="sse",
-            url=sse_url,
-            timeout=30
+            name="brave-search", transport="sse", url=sse_url, timeout=30
         )
 
         mcp_registry = MCPToolRegistry(tool_prefix="brave")
@@ -319,6 +267,7 @@ def create_worker_agent(
 # turn. That pair is the correlation key - two delegations in one turn can
 # target the SAME worker tool, so keying by tool name would collide.
 
+
 class DelegationReporter:
     """Bus subscriber narrating the manager's fan-out as it happens.
 
@@ -333,17 +282,23 @@ class DelegationReporter:
         self.log: List[str] = []
 
     def on_batch_scheduled(self, event: ToolBatchScheduledEvent) -> None:
-        print(f"\n  [scheduler] step {event.step}: "
-              f"{event.batch_size} delegation(s) this turn:")
+        print(
+            f"\n  [scheduler] step {event.step}: "
+            f"{event.batch_size} delegation(s) this turn:"
+        )
         for i, group in enumerate(event.groups, start=1):
             how = "PARALLEL" if group.parallel else "sequential"
-            print(f"    group {i}: {how:10} [{group.side_effect.value}] "
-                  f"{', '.join(group.tool_names)}")
+            print(
+                f"    group {i}: {how:10} [{group.side_effect.value}] "
+                f"{', '.join(group.tool_names)}"
+            )
 
     def on_delegation_start(self, event: ToolCallPreEvent) -> None:
         self.starts[(event.step, event.call_index)] = time.perf_counter()
-        print(f"  [delegate] step {event.step} call {event.call_index}: "
-              f"-> {event.tool_name}")
+        print(
+            f"  [delegate] step {event.step} call {event.call_index}: "
+            f"-> {event.tool_name}"
+        )
 
     def on_delegation_done(self, event: ToolCallPostEvent) -> None:
         started = self.starts.pop((event.step, event.call_index), None)
@@ -353,13 +308,16 @@ class DelegationReporter:
             f"step {event.step} call {event.call_index} {event.tool_name}: "
             f"{duration:.1f}s ok={event.succeeded}"
         )
-        print(f"  [result]   step {event.step} call {event.call_index}: "
-              f"{event.tool_name} in {duration:.1f}s -> {snippet}")
+        print(
+            f"  [result]   step {event.step} call {event.call_index}: "
+            f"{event.tool_name} in {duration:.1f}s -> {snippet}"
+        )
 
 
 # ==============================================================================
 # SECTION 3: BUILDING THE RESEARCH TEAM
 # ==============================================================================
+
 
 async def build_research_team(llm):
     """
@@ -440,7 +398,7 @@ async def build_research_team(llm):
     )
     print("    Analyst agent ready [SafeCalculatorTool]")
 
-    # WRITER: No tools — relies on the LLM's own writing ability
+    # WRITER: No tools - relies on the LLM's own writing ability
     writer = create_worker_agent(
         llm,
         [],  # No tools!
@@ -570,6 +528,7 @@ async def build_research_team(llm):
 # SECTION 4: RUNNING THE DEMO
 # ==============================================================================
 
+
 async def run_preset_demo(manager, reporter):
     """Run a preset query to showcase the team in action."""
     print_section("RUNNING PRESET DEMO QUERY")
@@ -615,7 +574,9 @@ async def run_interactive(manager):
     print("    - Analyst:    Performs mathematical calculations")
     print("    - Writer:     Synthesizes findings into reports")
     print("\n  Example queries:")
-    print('    - "Find the price of Ethereum and calculate how many I can buy with $2,000"')
+    print(
+        '    - "Find the price of Ethereum and calculate how many I can buy with $2,000"'
+    )
     print('    - "Research the latest AI trends and write a brief summary"')
     print('    - "What is 15% of 8,500?"')
     print('    - "Separately: find the price of Bitcoin, and compute 5000 / 3.14"')
@@ -640,7 +601,9 @@ async def run_interactive(manager):
             print(result)
             print()
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, EOFError):
+            # Ctrl-C, or stdin closed (a pipe or CI run): stop cleanly
+            # instead of re-prompting forever.
             print("\n\n  Interrupted. Goodbye!")
             break
         except Exception as e:

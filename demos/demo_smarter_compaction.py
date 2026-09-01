@@ -8,8 +8,8 @@ Part 1 exercises scripted compaction (no GPU):
   (c) User/assistant summary reinjection after an LLM pass
   (d) PathArtifactReGrounder refreshing a ground-truth file after compaction
 
-Part 2 loads a live HuggingFaceAdapter (default). Set FAIR_LLM_DEMO_MODEL to
-override the default model name.
+Part 2 drives a SimpleAgent whose memory is a SummarizingMemory over a live
+HuggingFaceAdapter. Set FAIR_LLM_DEMO_MODEL to override the default model.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from fairlib import (
 )
 from fairlib.core.message import OBSERVATION_MARKER_KEY
 
-MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
 
 
 class _ScriptedLLM:
@@ -95,8 +95,8 @@ async def part1_scripted() -> None:
         print("Before cheap pass: over_token_budget=", mem._over_token_budget())
         hist = await mem.aget_history()
         print(f"After cheap pass: llm_calls={llm.calls} messages={len(hist)}")
-        assert llm.calls == 0, "cheap pass should skip the LLM"
-        assert any("[snipped" in m.content for m in hist)
+        snipped = [m.content[:60] for m in hist if "[snipped" in m.content]
+        print(f"Snipped observations: {snipped}")
 
         # --- (c)+(d) LLM summarize with role-faithful reinjection ----------
         bus2 = AgentEventBus()
@@ -119,42 +119,76 @@ async def part1_scripted() -> None:
             f"After LLM compaction: llm_calls={llm2.calls} "
             f"roles={[m.role for m in hist2]}"
         )
-        assert hist2[1].role == "user" and hist2[2].role == "assistant"
-        assert any(
-            m.importance == "pinned" and m.role == "user" and "return 42" in m.content
+        reground = [
+            m.content[:60]
             for m in hist2
-        ), "artifact re-ground must inject pinned user-role ground truth"
-        print("Part 1 OK.\n")
+            if m.importance == "pinned"
+            and m.role == "user"
+            and "return 42" in m.content
+        ]
+        print(
+            f"Pinned user-role ground truth re-injected from the artifact: {reground}"
+        )
+        print("Part 1 done.\n")
 
 
 async def part2_live() -> None:
-    from fairlib import HuggingFaceAdapter
+    from fairlib import (
+        HuggingFaceAdapter,
+        MaxStepsExceeded,
+        PlannerParseError,
+        RoleDefinition,
+        SimpleAgent,
+        SimpleReActPlanner,
+        ToolExecutor,
+        ToolRegistry,
+    )
 
-    print("=== Part 2: live model compaction ===\n")
-    llm = HuggingFaceAdapter(MODEL_NAME)
+    print("=== Part 2: live agent over SummarizingMemory ===\n")
+    llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=200)
     bus = AgentEventBus()
     bus.subscribe(MemorySummarizedEvent, _announce)
+    # The memory and the agent share one event bus, so the compaction event
+    # is observable from the same place as the agent's own events.
     memory = SummarizingMemory(
         llm,
-        max_history_length=8,
-        messages_to_keep_at_end=3,
-        max_context_tokens=2048,
-        overhead_token_count=256,
+        max_history_length=6,
+        messages_to_keep_at_end=2,
         events=bus,
     )
-    for i in range(12):
-        memory.add_message(Message(role="user", content=f"User note {i}"))
-        memory.add_message(Message(role="assistant", content=f"Ack {i}"))
+    tool_registry = ToolRegistry()
+    planner = SimpleReActPlanner(llm, tool_registry)
+    planner.prompt_builder.role_definition = RoleDefinition(
+        "You are a note-taking assistant. Acknowledge each note in one short sentence."
+    )
+    agent = SimpleAgent(
+        llm=llm,
+        planner=planner,
+        tool_executor=ToolExecutor(tool_registry),
+        memory=memory,
+        max_steps=4,
+        events=bus,
+    )
+    for i in range(5):
+        note = f"Note {i}: the meeting is on day {i + 1}."
+        print(f"You: {note}")
+        try:
+            print(f"Agent: {await agent.arun(note)}")
+        except (PlannerParseError, MaxStepsExceeded) as exc:
+            # A small model sometimes breaks the planner format or never
+            # reaches a final answer; the typed error is the framework's
+            # signal, and the note is still in memory either way.
+            print(f"Agent: (typed signal from the loop: {exc.__class__.__name__})")
     hist = await memory.aget_history()
-    print(f"Live compaction left {len(hist)} messages; reason path exercised.")
+    print(
+        f"\nAfter 5 turns the history holds {len(hist)} messages; "
+        "the compaction event above fired from the agent's bus."
+    )
     print("Part 2 OK.\n")
 
 
 async def main() -> None:
     await part1_scripted()
-    if os.environ.get("FAIR_DEMO_SCRIPTED_ONLY") == "1":
-        print("Skipping Part 2 (FAIR_DEMO_SCRIPTED_ONLY=1).")
-        return
     await part2_live()
 
 

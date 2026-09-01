@@ -14,34 +14,34 @@ The workflow covers chunking strategies through DocumentProcessor (sentence,
 fixed-size, semantic), metadata filters on SimpleRetriever, incremental
 add_documents on vector stores, loading README.md, embedding with
 SentenceTransformerEmbedder, storing in ChromaDBVectorStore, retrieving with
-KnowledgeBaseQueryTool, and generating answers with a local HuggingFace model.
+RAGQueryTool, and generating answers with a local HuggingFace model.
 
 Run: PYTHONPATH=. python demos/demo_rag_from_documents.py
 Requires chromadb, sentence-transformers, and a GPU for the agent section.
 Set FAIR_LLM_DEMO_MODEL to override the default model.
 """
+
 import asyncio
-import os
 import logging
+import os
 from pathlib import Path
 
 try:
     import chromadb
+
     CHROMADB_LOADED = True
 except ImportError:
     print("chromadb not found. To run this RAG demo, please run 'pip install chromadb'")
     chromadb = None
     CHROMADB_LOADED = False
 
-from fairlib.utils.document_processor import DocumentProcessor
-
 from fairlib import (
+    ChromaDBVectorStore,
     Document,
     HuggingFaceAdapter,
     InMemoryVectorStore,
-    KnowledgeBaseQueryTool,
     LongTermMemory,
-    ChromaDBVectorStore,
+    RAGQueryTool,
     ReActPlanner,
     SentenceTransformerEmbedder,
     SimpleAgent,
@@ -50,8 +50,11 @@ from fairlib import (
     ToolRegistry,
     WorkingMemory,
 )
+from fairlib.utils.document_processor import DocumentProcessor
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = os.getenv("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
@@ -69,10 +72,15 @@ def demo_chunking_filters_incremental() -> None:
             "chunking_strategy": "sentence",
         }
     )
-    sample = "Algebra studies symbols. Geometry studies shapes. Poetry studies language."
+    sample = (
+        "Algebra studies symbols. Geometry studies shapes. Poetry studies language."
+    )
     print("Sentence chunks:", processor.split_text(sample))
     print("Fixed chunks:", processor.split_text(sample, strategy="fixed", max_chars=20))
-    print("Semantic chunks:", processor.split_text(sample, strategy="semantic", max_chars=45))
+    print(
+        "Semantic chunks:",
+        processor.split_text(sample, strategy="semantic", max_chars=45),
+    )
 
     store = InMemoryVectorStore()
     store.add_documents(
@@ -82,10 +90,14 @@ def demo_chunking_filters_incremental() -> None:
         ]
     )
     # Incremental update: append without rebuilding the store.
-    store.add_documents([Document("Poetry context: meter and imagery.", {"topic": "literature"})])
+    store.add_documents(
+        [Document("Poetry context: meter and imagery.", {"topic": "literature"})]
+    )
 
     retriever = SimpleRetriever(store)
-    math_hits = retriever.retrieve("context", top_k=3, metadata_filter={"topic": "math"})
+    math_hits = retriever.retrieve(
+        "context", top_k=3, metadata_filter={"topic": "math"}
+    )
     print("Math-only retrieval:", [doc.page_content for doc in math_hits])
     hybrid = retriever.retrieve_hybrid("context", preload_k=1, explore_k=3)
     print("Hybrid preload:", hybrid.preloaded[0])
@@ -96,7 +108,9 @@ async def demo_chroma_rag_agent() -> None:
     print("\n=== Part 2: Chroma-backed RAG agent (real inference) ===")
 
     if not CHROMADB_LOADED:
-        logger.critical("ChromaDB library is required for this demo but is not installed. Exiting.")
+        logger.critical(
+            "ChromaDB library is required for this demo but is not installed. Exiting."
+        )
         return
 
     logger.info("Initializing RAG components...")
@@ -131,9 +145,9 @@ async def demo_chroma_rag_agent() -> None:
     long_term_memory.add_document(chunks)
     logger.info("Document successfully ingested into long-term memory.")
 
-    knowledge_tool = KnowledgeBaseQueryTool(retriever)
+    rag_tool = RAGQueryTool(retriever)
     tool_registry = ToolRegistry()
-    tool_registry.register_tool(knowledge_tool)
+    tool_registry.register_tool(rag_tool)
 
     planner = ReActPlanner(llm, tool_registry)
     executor = ToolExecutor(tool_registry)
@@ -142,7 +156,7 @@ async def demo_chroma_rag_agent() -> None:
     rag_agent = SimpleAgent(llm, planner, executor, working_memory)
     rag_agent.role_description = (
         "You are a helpful AI assistant and an expert on the FAIR-LLM framework. "
-        "You MUST use the 'course_knowledge_query' tool to answer questions about "
+        "You MUST use the 'search_knowledge_base' tool to answer questions about "
         "the framework, its principles, or its architecture."
     )
     logger.info("RAG agent created.")

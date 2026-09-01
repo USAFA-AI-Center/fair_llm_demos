@@ -47,7 +47,12 @@ from fairlib import (
     UnverifiedCompletionEvent,
     WorkingMemory,
 )
-from fairlib.core.interfaces.tools import AbstractTool, SideEffect, TextResult, ToolOutput
+from fairlib.core.interfaces.tools import (
+    AbstractTool,
+    SideEffect,
+    TextResult,
+    ToolOutput,
+)
 from fairlib.core.prompts import PromptBuilder
 
 MODEL_NAME = "dolphin3-qwen25-3b"
@@ -76,7 +81,9 @@ class ScheduleEventInput(BaseModel):
 
     title: str = Field(description="Short event title.")
     location: Location = Field(description="Where the event happens.")
-    priority: Priority = Field(default=Priority.NORMAL, description="How important the event is.")
+    priority: Priority = Field(
+        default=Priority.NORMAL, description="How important the event is."
+    )
     tags: List[Literal["work", "personal", "urgent"]] = Field(
         default_factory=list, description="Zero or more labels for the event."
     )
@@ -110,7 +117,9 @@ def show_generated_catalog(registry: ToolRegistry) -> None:
     """Feature 1: print the tool catalog the model will receive, from the schema."""
     builder = PromptBuilder()
     builder.add_tool_registry(registry)
-    print("=== Feature 1: Auto-generated catalog (nested model, enum, list of literals) ===")
+    print(
+        "=== Feature 1: Auto-generated catalog (nested model, enum, list of literals) ==="
+    )
     print(builder.render_tool_catalog())
     print()
 
@@ -120,7 +129,9 @@ async def show_validation_rejection(registry: ToolRegistry) -> None:
     executor = ToolExecutor(registry)
     # 'location' must be an object; passing a bare string is a hard schema mismatch.
     bad_input = {"title": "Sprint Review", "location": "Denver", "priority": "high"}
-    print("=== Feature 2: Validation before dispatch (typed error carries the schema) ===")
+    print(
+        "=== Feature 2: Validation before dispatch (typed error carries the schema) ==="
+    )
     print(f"Calling schedule_event with a bad location: {bad_input}")
     try:
         await executor.aexecute("schedule_event", bad_input)
@@ -146,7 +157,9 @@ async def main() -> None:
     show_generated_catalog(registry)
     await show_validation_rejection(registry)
 
-    print(f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)...")
+    print(
+        f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
+    )
     llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
 
     executor = ToolExecutor(registry)
@@ -175,7 +188,9 @@ async def main() -> None:
 
     print("=" * 70)
     print(f"Question:\n  {QUESTION}\n")
-    print("Running the agent (it learns the tool's fields from the generated catalog)...\n")
+    print(
+        "Running the agent (it learns the tool's fields from the generated catalog)...\n"
+    )
     answer = await agent.arun(QUESTION)
     print("\nAgent answer:")
     print(answer)

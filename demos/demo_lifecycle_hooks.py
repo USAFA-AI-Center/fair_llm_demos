@@ -1,7 +1,7 @@
 # demo_lifecycle_hooks.py
 
 """
-Lifecycle hooks in the SimpleAgent ReAct loop (issue #74).
+Lifecycle hooks in the SimpleAgent ReAct loop.
 
 Unlike the event bus (observe-only), lifecycle hooks can intercept,
 modify, or veto actions at pre-model, pre-tool, and post-tool points.

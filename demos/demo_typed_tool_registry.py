@@ -28,18 +28,18 @@ import tempfile
 from pathlib import Path
 
 from fairlib import (
-    HuggingFaceAdapter,
-    ToolRegistry,
-    ToolExecutor,
-    WorkingMemory,
-    SimpleAgent,
-    SimpleReActPlanner,
-    RoleDefinition,
-    SafeCalculatorTool,
     GlobTool,
     GrepTool,
+    HuggingFaceAdapter,
     ListDirTool,
     ReadFileTool,
+    RoleDefinition,
+    SafeCalculatorTool,
+    SimpleAgent,
+    SimpleReActPlanner,
+    ToolExecutor,
+    ToolRegistry,
+    WorkingMemory,
 )
 
 # The local model that drives the agent.
@@ -59,10 +59,7 @@ FIXTURE_FILES = {
         "    return subtotal + tax + shipping\n"
     ),
     "catalog/products.py": (
-        "PRODUCTS = {\n"
-        '    "widget": 9.99,\n'
-        '    "gadget": 14.50,\n'
-        "}\n"
+        'PRODUCTS = {\n    "widget": 9.99,\n    "gadget": 14.50,\n}\n'
     ),
 }
 
@@ -81,7 +78,9 @@ def build_fixture(root: Path) -> None:
 
 
 async def main() -> None:
-    print(f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)...")
+    print(
+        f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
+    )
     llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -92,18 +91,26 @@ async def main() -> None:
         # file tools, every file tool confined to the fixture root.
         registry = ToolRegistry()
         registry.register_tool(SafeCalculatorTool())
-        for tool in (ListDirTool(root), GlobTool(root), GrepTool(root), ReadFileTool(root)):
+        for tool in (
+            ListDirTool(root),
+            GlobTool(root),
+            GrepTool(root),
+            ReadFileTool(root),
+        ):
             registry.register_tool(tool)
         print(f"Full registry: {list(registry.get_all_tools())}")
 
         # Bundle only the read-only search tools into a group. get(ToolType) does
         # the lookup type-safely - the result is the concrete tool class, so a
         # rename is caught here rather than as a runtime miss on a string key.
-        registry.register_group("file_search", [
-            registry.get(GlobTool),
-            registry.get(GrepTool),
-            registry.get(ReadFileTool),
-        ])
+        registry.register_group(
+            "file_search",
+            [
+                registry.get(GlobTool),
+                registry.get(GrepTool),
+                registry.get(ReadFileTool),
+            ],
+        )
 
         # The agent's toolset is the group view and nothing else. It is a
         # ToolRegistry, so it powers the executor and planner like any registry,

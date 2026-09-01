@@ -21,20 +21,20 @@ import tempfile
 from pathlib import Path
 
 from fairlib import (
-    HuggingFaceAdapter,
-    ToolRegistry,
-    ToolExecutor,
-    WorkingMemory,
-    SimpleAgent,
-    SimpleReActPlanner,
-    RoleDefinition,
+    EditFileTool,
     GlobTool,
     GrepTool,
+    HuggingFaceAdapter,
     ListDirTool,
     ReadFileTool,
-    EditFileTool,
-    WriteFileTool,
+    RoleDefinition,
     ShellTool,
+    SimpleAgent,
+    SimpleReActPlanner,
+    ToolExecutor,
+    ToolRegistry,
+    WorkingMemory,
+    WriteFileTool,
 )
 from fairlib.modules.security.basic_security_manager import BasicSecurityManager
 
@@ -46,8 +46,7 @@ MODEL_NAME = "Qwen/Qwen2.5-14B-Instruct"
 # run the check to confirm. The fix is a single unique-substring edit.
 FIXTURE_FILES = {
     "README.md": (
-        "# Calc\n\n"
-        "A toy math package. Run `python3 run_checks.py` to verify it.\n"
+        "# Calc\n\nA toy math package. Run `python3 run_checks.py` to verify it.\n"
     ),
     "app/__init__.py": "",
     "app/calculator.py": (
@@ -79,7 +78,9 @@ def build_fixture(root: Path) -> None:
 
 
 async def main():
-    print(f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)...")
+    print(
+        f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
+    )
     llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
 
     with tempfile.TemporaryDirectory() as tmp:

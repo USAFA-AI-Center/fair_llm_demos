@@ -4,25 +4,29 @@ This module provides a tutorial on comparing the outputs of different Large
 Language Models (LLMs) for the same task, showcasing the power of the framework's
 Model Abstraction Layer (MAL).
 """
+
 import asyncio
 from typing import Dict
 
-# --- Step 1: Import all necessary components ---
 from fairlib import (
     HuggingFaceAdapter,
-    SimpleAgent,
-    WorkingMemory,
     ReActPlanner,
+    SimpleAgent,
+    ToolExecutor,
     ToolRegistry,
-    ToolExecutor
+    WorkingMemory,
 )
 from fairlib.core.errors import FairlibError
+from fairlib.core.interfaces.llm import (
+    AbstractChatModel,
+)  # Keep interface for type hinting
 
-from fairlib.core.interfaces.llm import AbstractChatModel # Keep interface for type hinting
 
 # --- Step 2: Create a simple factory to build agents ---
 # This helps keep our code clean when creating multiple identical agents.
-def create_comparison_agent(llm: AbstractChatModel, role_description: str) -> SimpleAgent:
+def create_comparison_agent(
+    llm: AbstractChatModel, role_description: str
+) -> SimpleAgent:
     """Creates a basic agent with no tools for text generation comparison."""
     # An agent with no tools will rely entirely on its LLM for responses.
     tool_registry = ToolRegistry()
@@ -30,7 +34,7 @@ def create_comparison_agent(llm: AbstractChatModel, role_description: str) -> Si
     memory = WorkingMemory()
     # Even with no tools, the ReActPlanner effectively prompts the LLM to give a direct answer.
     planner = ReActPlanner(llm, tool_registry)
-    
+
     agent = SimpleAgent(llm, planner, executor, memory)
     agent.role_description = role_description
     return agent
@@ -38,21 +42,23 @@ def create_comparison_agent(llm: AbstractChatModel, role_description: str) -> Si
 
 async def main():
     """The main function to set up and run the model comparison."""
-    
+
     # --- Step 3: Dynamically Initialize LLMs from Settings ---
     # This section demonstrates the plug-and-play nature of the MAL.
     # We will try to initialize every model the user has configured
     # in their settings.yml file.
     print("Initializing configured models from settings...")
-    
+
     models: Dict[str, AbstractChatModel] = {}
-    
+
     # initialize models for comparison
     models["dolphin3-qwen25-3b"] = HuggingFaceAdapter("dolphin3-qwen25-3b")
     models["dolphin3-qwen25-0.5b"] = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
 
     if not models:
-        print("\n❌ No valid models were initialized. Please check your API keys and configuration in `config/settings.yml`.")
+        print(
+            "\nNo valid models were initialized. Please check your API keys and configuration in `config/settings.yml`."
+        )
         return
 
     # --- Step 4: Create an Identical Agent for Each Model ---
@@ -67,7 +73,7 @@ async def main():
         "You are a creative poet. You have no tools; when asked for a poem, "
         "deliver the finished poem itself as your final answer."
     )
-    
+
     agents = {
         name: create_comparison_agent(model, role) for name, model in models.items()
     }
@@ -99,6 +105,7 @@ async def main():
         else:
             print(response)
         print("-------------------------------------")
+
 
 if __name__ == "__main__":
     # To get the most out of this demo, ensure you have API keys for

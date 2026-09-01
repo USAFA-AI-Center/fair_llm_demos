@@ -107,11 +107,12 @@ To run WITHOUT test execution (static analysis only):
 
 Note: The --tests argument is not needed when using --no-run.
 """
+
 import argparse
 import asyncio
 import json
-import os
 import logging
+import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -148,9 +149,7 @@ def create_grader(
     events: Optional[AgentEventBus] = None,
 ) -> SimpleAgent:
     """Build one stateless committee grader via the shared agent factory."""
-    return create_agent(
-        llm, role_description, tools, stateless=True, events=events
-    )
+    return create_agent(llm, role_description, tools, stateless=True, events=events)
 
 
 def _on_schedule(event: ToolBatchScheduledEvent) -> None:
@@ -158,7 +157,9 @@ def _on_schedule(event: ToolBatchScheduledEvent) -> None:
     print(f"[scheduler] {event.batch_size} delegation(s) in this turn:")
     for i, group in enumerate(event.groups, start=1):
         how = "PARALLEL" if group.parallel else "sequential"
-        print(f"  group {i}: {how:11} [{group.side_effect.value}] {', '.join(group.tool_names)}")
+        print(
+            f"  group {i}: {how:11} [{group.side_effect.value}] {', '.join(group.tool_names)}"
+        )
 
 
 async def grade_single_submission(submission_doc, test_code, rubric, run_tests: bool):
@@ -166,8 +167,12 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
     Orchestrates the multi-agent grading process for a single code submission.
     """
     submission_text = submission_doc.page_content
-    submission_filename = Path(submission_doc.metadata.get("source", "unknown_submission")).name
-    logger.info(f"--- Starting code grading for: {submission_filename} (Run tests: {run_tests}) ---")
+    submission_filename = Path(
+        submission_doc.metadata.get("source", "unknown_submission")
+    ).name
+    logger.info(
+        f"--- Starting code grading for: {submission_filename} (Run tests: {run_tests}) ---"
+    )
 
     # The multi-action JSON contract with code-heavy delegation payloads
     # needs a capable instruct model; override with FAIR_LLM_DEMO_MODEL
@@ -202,10 +207,12 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
     # rendered tool catalog, so they carry each seat's role and the
     # instruction that a delegation must be self-contained.
     static_analyzer = create_grader(
-        llm, "A senior developer. Analyze the code for style, clarity, comments, and complexity. Do not run it."
+        llm,
+        "A senior developer. Analyze the code for style, clarity, comments, and complexity. Do not run it.",
     )
     logic_reviewer = create_grader(
-        llm, "A principal software architect. Review the code for its algorithmic approach, logic, and efficiency."
+        llm,
+        "A principal software architect. Review the code for its algorithmic approach, logic, and efficiency.",
     )
     rubric_aligner = create_grader(
         llm,
@@ -257,7 +264,9 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
     # sequential barrier instead of overlapping it with other delegations.
     if run_tests:
         code_runner = create_grader(
-            llm, "A QA Engineer. Use the 'run_code_with_tests' tool.", [CodeExecutionTool()]
+            llm,
+            "A QA Engineer. Use the 'run_code_with_tests' tool.",
+            [CodeExecutionTool()],
         )
         worker_tools.append(
             WorkerAgentTool(
@@ -283,7 +292,7 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
     )
     manager_builder.examples.append(
         Example(
-            'User: Review this submission.\n'
+            "User: Review this submission.\n"
             'Assistant: {"thought": "The two reviews are independent, so I '
             'delegate both in one turn.", "actions": ['
             '{"tool_name": "static_analyzer", "tool_input": "Review the '
@@ -322,9 +331,13 @@ async def grade_single_submission(submission_doc, test_code, rubric, run_tests: 
         "they will run concurrently."
     ]
     if run_tests:
-        workflow_steps.insert(0, "Delegate to `code_runner` to execute the code against the tests.")
+        workflow_steps.insert(
+            0, "Delegate to `code_runner` to execute the code against the tests."
+        )
     workflow_steps.append("Synthesize all results.")
-    workflow_steps.append("Delegate to `rubric_aligner` with all information to get the final structured grade.")
+    workflow_steps.append(
+        "Delegate to `rubric_aligner` with all information to get the final structured grade."
+    )
     workflow_steps.append(
         "STOP CONDITION: once an Observation from rubric_aligner appears in "
         "the history, do NOT delegate again. Your next turn must be the "
@@ -337,7 +350,7 @@ You are the lead developer managing this code review. Coordinate your team to
 grade the following programming assignment. Every delegation must be a
 complete, self-contained task: the worker sees only the subtask text you
 send, so include the code (and anything else the worker needs) each time.
-Workflow: {" ".join([f"{i+1}. {step}" for i, step in enumerate(workflow_steps)])}
+Workflow: {" ".join([f"{i + 1}. {step}" for i, step in enumerate(workflow_steps)])}
 
 **Rubric:** {rubric}
 **Unit Tests (for context, not execution unless code_runner is used):** ```python\n{test_code if run_tests else "N/A - Execution is disabled."}\n```
@@ -346,7 +359,9 @@ Workflow: {" ".join([f"{i+1}. {step}" for i, step in enumerate(workflow_steps)])
 
     try:
         final_evaluation = await manager.arun(manager_prompt)
-        logger.info(f"Successfully completed agent run for {submission_filename}. Raw output:\n{final_evaluation}")
+        logger.info(
+            f"Successfully completed agent run for {submission_filename}. Raw output:\n{final_evaluation}"
+        )
         # The grading tool's typed GradeResult, captured off the event bus at
         # its source, is the authoritative structured grade; the manager's
         # final text is presentation on top of it. Fall back to the raw text
@@ -355,12 +370,20 @@ Workflow: {" ".join([f"{i+1}. {step}" for i, step in enumerate(workflow_steps)])
             return structured_grades[-1]
         return final_evaluation
     except Exception as e:
-        logger.error(f"The multi-agent run failed for {submission_filename}: {e}", exc_info=True)
+        logger.error(
+            f"The multi-agent run failed for {submission_filename}: {e}", exc_info=True
+        )
         # Return a structured error message that format_report can handle
-        return json.dumps({"error": f"A critical error occurred during the agent execution for this submission ({type(e).__name__}). Details: {e}"})
+        return json.dumps(
+            {
+                "error": f"A critical error occurred during the agent execution for this submission ({type(e).__name__}). Details: {e}"
+            }
+        )
 
 
-async def main(submissions_dir, rubric_path, output_dir, tests_path=None, run_tests=True):
+async def main(
+    submissions_dir, rubric_path, output_dir, tests_path=None, run_tests=True
+):
     """Main function to run the batch grading process for code."""
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
@@ -370,7 +393,11 @@ async def main(submissions_dir, rubric_path, output_dir, tests_path=None, run_te
     # judges each submission whole with one report per student, so these
     # loads use the processor's whole-file surface rather than its RAG
     # chunking.
-    rubric_content = doc_proc.read_file_text(str(Path(rubric_path)))
+    try:
+        rubric_content = doc_proc.read_file_text(str(Path(rubric_path)))
+    except ImportError as e:
+        logger.critical(f"Could not load rubric from '{rubric_path}': {e}. Exiting.")
+        return
     if not rubric_content:
         logger.critical(f"Could not load rubric from '{rubric_path}'. Exiting.")
         return
@@ -378,9 +405,17 @@ async def main(submissions_dir, rubric_path, output_dir, tests_path=None, run_te
     test_code_content = None
     if run_tests:
         if not tests_path:
-            logger.critical("--tests argument is required when running with execution. Exiting.")
+            logger.critical(
+                "--tests argument is required when running with execution. Exiting."
+            )
             return
-        test_code_content = doc_proc.read_file_text(str(Path(tests_path)))
+        try:
+            test_code_content = doc_proc.read_file_text(str(Path(tests_path)))
+        except ImportError as e:
+            logger.critical(
+                f"Could not load unit tests from '{tests_path}': {e}. Exiting."
+            )
+            return
         if not test_code_content:
             logger.critical(f"Could not load unit tests from '{tests_path}'. Exiting.")
             return
@@ -392,25 +427,54 @@ async def main(submissions_dir, rubric_path, output_dir, tests_path=None, run_te
 
     for submission in student_submissions:
         try:
-            grade_json = await grade_single_submission(submission, test_code_content, rubric_content, run_tests)
+            grade_json = await grade_single_submission(
+                submission, test_code_content, rubric_content, run_tests
+            )
             original_filename = Path(submission.metadata["source"]).stem
             report_filepath = output_path / f"{original_filename}_grade_report.txt"
-            report_content = format_report(grade_json, Path(submission.metadata["source"]).name)
-            report_filepath.write_text(report_content, encoding='utf-8')
+            report_content = format_report(
+                grade_json, Path(submission.metadata["source"]).name
+            )
+            report_filepath.write_text(report_content, encoding="utf-8")
             logger.info(f"Grade report saved to: {report_filepath}")
         except Exception as e:
-            logger.error(f"A critical error occurred while processing {submission.metadata.get('source', 'a submission')}. Skipping. Error: {e}", exc_info=True)
+            logger.error(
+                f"A critical error occurred while processing {submission.metadata.get('source', 'a submission')}. Skipping. Error: {e}",
+                exc_info=True,
+            )
 
     logger.info("\n--- Programming Grading Batch Complete ---")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Multi-Agent AI Programming Autograder")
-    parser.add_argument("--submissions", type=str, required=True, help="Directory with student code submissions.")
-    parser.add_argument("--rubric", type=str, required=True, help="Path to the grading rubric .txt file.")
-    parser.add_argument("--output", type=str, required=True, help="Directory to save grade reports.")
-    parser.add_argument("--tests", type=str, help="Path to the pytest unit tests file. Required unless --no-run is specified.")
-    parser.add_argument("--no-run", action="store_true", help="Disable code execution. The grader will only perform static analysis.")
+    parser = argparse.ArgumentParser(
+        description="Multi-Agent AI Programming Autograder"
+    )
+    parser.add_argument(
+        "--submissions",
+        type=str,
+        required=True,
+        help="Directory with student code submissions.",
+    )
+    parser.add_argument(
+        "--rubric",
+        type=str,
+        required=True,
+        help="Path to the grading rubric .txt file.",
+    )
+    parser.add_argument(
+        "--output", type=str, required=True, help="Directory to save grade reports."
+    )
+    parser.add_argument(
+        "--tests",
+        type=str,
+        help="Path to the pytest unit tests file. Required unless --no-run is specified.",
+    )
+    parser.add_argument(
+        "--no-run",
+        action="store_true",
+        help="Disable code execution. The grader will only perform static analysis.",
+    )
     args = parser.parse_args()
 
     run_tests_flag = not args.no_run
@@ -419,13 +483,21 @@ if __name__ == "__main__":
     Path(args.submissions).mkdir(exist_ok=True)
     Path(args.output).mkdir(exist_ok=True)
 
-    if not list(Path(args.submissions).glob('*')):
-        (Path(args.submissions) / "student1_assignment.py").write_text("def add(a, b):\n    return a + b\n")
+    if not list(Path(args.submissions).glob("*")):
+        (Path(args.submissions) / "student1_assignment.py").write_text(
+            "def add(a, b):\n    return a + b\n"
+        )
 
     if run_tests_flag and args.tests and not Path(args.tests).exists():
-        (Path(args.tests)).write_text("from temp_student_code import add\n\ndef test_add():\n    assert add(2, 3) == 5\n\ndef test_add_negative():\n    assert add(-1, -1) == -2\n")
+        (Path(args.tests)).write_text(
+            "from student_code import add\n\ndef test_add():\n    assert add(2, 3) == 5\n\ndef test_add_negative():\n    assert add(-1, -1) == -2\n"
+        )
 
     if not Path(args.rubric).exists():
-        (Path(args.rubric)).write_text("- Correctness (10 pts): Passes all unit tests.\n- Style (5 pts): Follows PEP 8.")
+        (Path(args.rubric)).write_text(
+            "- Correctness (10 pts): Passes all unit tests.\n- Style (5 pts): Follows PEP 8."
+        )
 
-    asyncio.run(main(args.submissions, args.rubric, args.output, args.tests, run_tests_flag))
+    asyncio.run(
+        main(args.submissions, args.rubric, args.output, args.tests, run_tests_flag)
+    )

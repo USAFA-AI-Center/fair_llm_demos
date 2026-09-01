@@ -1,7 +1,7 @@
 # demo_action_verifier.py
 
 """
-Post-action verification in the SimpleAgent ReAct loop (issue #73).
+Post-action verification in the SimpleAgent ReAct loop.
 
 After a tool dispatches successfully, an optional action verifier runs
 deterministic checks (rules, linters, tests, tool probes) and feeds
