@@ -11,7 +11,8 @@ read-only search tools into a "file_search" group, and hands that group - and
 nothing else - to an agent as its complete toolset. The agent then answers a
 question about a small project tree it has to navigate, proving the scoped
 toolset is enough to do the job and that the agent never had reach to anything
-outside the group.
+outside the group. Every tool call the agent makes is printed from the event
+bus, so the run shows it only ever calls tools from the group.
 
 Two parts of the registry contract carry this:
 - get(ToolType) assembles the group with type-safe lookups, so the wiring is
@@ -37,6 +38,7 @@ from fairlib import (
     SafeCalculatorTool,
     SimpleAgent,
     SimpleReActPlanner,
+    ToolCallPostEvent,
     ToolExecutor,
     ToolRegistry,
     WorkingMemory,
@@ -67,6 +69,14 @@ QUESTION = (
     "Which file defines the function compute_total, and what does that function "
     "return? Give the file path and a one-sentence description of the return value."
 )
+
+
+def on_tool_call(event: ToolCallPostEvent) -> None:
+    """Print one tool call: the tool, its input, and what it returned, whole."""
+    status = "ok" if event.succeeded else "failed"
+    print(
+        f"  [{event.tool_name}] {event.tool_input!r} -> {status}:\n{event.observation}"
+    )
 
 
 def build_fixture(root: Path) -> None:
@@ -125,11 +135,7 @@ async def main() -> None:
             "You are a codebase navigator. You answer questions about a project "
             "by searching its files. Work one step at a time: glob to find "
             "candidates, grep to locate a symbol, and read the few files that "
-            "matter before answering. Do not guess paths you have not seen. Pass "
-            "each tool a single bare value as tool_input, never a 'field: value' "
-            "pair and never wrapped in quotes: to grep for compute_total, write "
-            "tool_input: compute_total (not tool_input: pattern: compute_total, and "
-            "not tool_input with the value in quotes)."
+            "matter before answering. Do not guess paths you have not seen."
         )
 
         agent = SimpleAgent(
@@ -139,6 +145,7 @@ async def main() -> None:
             memory=WorkingMemory(),
             max_steps=12,
         )
+        agent.events.subscribe(ToolCallPostEvent, on_tool_call)
 
         print("=" * 60)
         print(f"Question:\n  {QUESTION}\n")

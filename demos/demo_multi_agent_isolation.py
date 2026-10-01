@@ -53,7 +53,7 @@ from fairlib.modules.agent.worker_tool import (
 from fairlib.modules.communication.in_memory_communicator import InMemoryCommunicator
 from fairlib.modules.security.basic_security_manager import BasicSecurityManager
 
-MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
 
 
 class _ShellTool(AbstractTool):

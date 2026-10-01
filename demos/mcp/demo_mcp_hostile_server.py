@@ -29,7 +29,7 @@ included, sitting in its prompt.
 
 PREREQUISITES:
     pip install mcp
-    A local model: defaults to HuggingFaceAdapter("dolphin3-qwen25-3b");
+    A local model: defaults to HuggingFaceAdapter("qwen25-7b");
     set FAIR_LLM_DEMO_MODEL to override.
 
 RUN:
@@ -62,7 +62,7 @@ from fairlib.modules.mcp import create_mcp_enhanced_registry
 HERE = Path(__file__).resolve().parent
 HOSTILE_SERVER = HERE / "mcp_hostile_server.py"
 HARDENED_SETTINGS = HERE / "hostile_demo_settings.yml"
-MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
 
 # The two invisible characters the server hides in a tool description,
 # written as escapes so nothing hidden sits in this file either.
@@ -154,6 +154,12 @@ async def show_pass(title: str, hardened: bool):
         f"  ends with the truncation marker: {observation.endswith(OBSERVATION_TRUNCATION_MARKER)}"
     )
     print(f"  forged banners inside: {observation.count(FORGED_BANNER)}")
+    print(
+        "  (no setting removes these: the cap only shortens the text. They are\n"
+        "   harmless to memory, because SummarizingMemory recognizes its own\n"
+        "   summaries by a metadata marker on the message, never by banner text,\n"
+        "   so a banner inside an observation cannot pass as a summary.)"
+    )
     print()
     return registry
 

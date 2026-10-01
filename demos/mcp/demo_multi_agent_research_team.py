@@ -18,7 +18,7 @@ PURPOSE:
 THE RESEARCH TEAM:
     Manager (a plain SimpleAgent whose tools ARE the workers)
        delegates to:
-       Researcher  (web search via MCP / Google CSE fallback)
+       Researcher  (web search via MCP)
        Analyst     (mathematical calculations)
        Writer      (synthesizes findings into a report, no tools)
 
@@ -47,9 +47,13 @@ What it shows:
     (ToolCallPreEvent/ToolCallPostEvent, keyed by (step, call_index)).
   - MCP interoperability: the Researcher does NOT implement its own web
     search; it connects to someone else's Brave Search MCP server. If
-    Brave Search is unavailable, the demo gracefully falls back to the
-    built-in WebSearcherTool (Google CSE); if neither is available, only
-    the Analyst and Writer workers have tools.
+    Brave Search is unavailable, the Researcher runs without tools and
+    only the Analyst and Writer workers have tools.
+
+Every run opens with a scripted request that needs no web search (two
+independent calculations for the Analyst, then a write-up for the Writer),
+so the fan-out and the delegation chain are visible even without Brave
+Search; the interactive session follows and ends at end of input.
 
 A note on stochasticity: a real local model drives the manager and every
 worker. Delegation quality and whether independent subtasks fan out in a
@@ -64,15 +68,12 @@ PREREQUISITES:
           --name brave-search-mcp \\
           shoofio/brave-search-mcp-sse:latest
 
-    Optional (for Google CSE fallback):
-        Set google_cse_search_api and google_cse_search_engine_id in
-        fairlib/config/settings.yml
-
 RUN:
     python demos/mcp/demo_multi_agent_research_team.py
 """
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -83,7 +84,6 @@ from typing import Dict, List, Optional, Tuple
 # ==============================================================================
 # Everything in this block comes from the fairlib root, which lazy-loads each
 # name on first access (see fairlib/__init__.py). What each one is for:
-#   settings                  - the validated AppSettings loaded from settings.yml
 #   PromptBuilder, RoleDefinition - declarative prompt content; the planner
 #                               merges its own mandatory format rules on top
 #   SimpleAgent               - the ReAct agent: think, act, observe, repeat
@@ -96,7 +96,7 @@ from typing import Dict, List, Optional, Tuple
 #   HuggingFaceAdapter        - one MAL adapter; every adapter implements
 #                               AbstractChatModel, so the provider is swappable
 #   ToolRegistry, ToolExecutor - hold tools; run them by name
-#   SafeCalculatorTool, WebSearcherTool - built-in tools the workers use
+#   SafeCalculatorTool        - built-in tool the Analyst uses
 #   MCPServerConfig, CompositeToolRegistry - connect an external MCP server and
 #                               merge its tools with the local ones
 #   AgentEventBus             - the typed event bus every step reports on;
@@ -114,11 +114,9 @@ from fairlib import (
     SimpleReActPlanner,
     ToolExecutor,
     ToolRegistry,
-    WebSearcherTool,
     WorkerAgentTool,
     WorkingMemory,
     build_worker_manager,
-    settings,
 )
 from fairlib.core.events import (
     ToolBatchScheduledEvent,
@@ -132,7 +130,17 @@ from fairlib.core.events import (
 # run concurrently within a turn; the conservative default EXTERNAL is a
 # sequential barrier.
 from fairlib.core.interfaces.tools import SideEffect
-from fairlib.core.message import OBSERVATION_PREFIX
+from fairlib.core.message import OBSERVATION_MARKER_KEY, has_marker
+
+
+def _delegation_text(tool_input: object) -> str:
+    """A delegation's input as the model wrote it: the subtask alone, or JSON."""
+    if isinstance(tool_input, dict) and set(tool_input) == {"subtask"}:
+        return str(tool_input["subtask"])
+    if isinstance(tool_input, (dict, list)):
+        return json.dumps(tool_input)
+    return str(tool_input)
+
 
 # ==============================================================================
 # SECTION 2: HELPER FUNCTIONS
@@ -193,6 +201,7 @@ def create_worker_agent(
     use_simple_planner: bool = False,
     mcp_registry=None,
     max_steps: int = 5,
+    role: Optional[str] = None,
 ):
     """
     Factory function to create a specialized worker agent.
@@ -217,6 +226,7 @@ def create_worker_agent(
         use_simple_planner: If True, use SimpleReActPlanner (better for small models)
         mcp_registry:       Optional MCPToolRegistry to merge with local tools
         max_steps:          Max reasoning steps before the agent gives up
+        role:               Optional role definition for the worker's planner
     """
     # Step 1: Create a local tool registry
     local_registry = ToolRegistry()
@@ -234,6 +244,8 @@ def create_worker_agent(
         planner = SimpleReActPlanner(llm, registry)
     else:
         planner = ReActPlanner(llm, registry)
+    if role is not None:
+        planner.prompt_builder.role_definition = RoleDefinition(role)
 
     # Step 4: Create the executor
     executor = ToolExecutor(registry)
@@ -297,20 +309,19 @@ class DelegationReporter:
         self.starts[(event.step, event.call_index)] = time.perf_counter()
         print(
             f"  [delegate] step {event.step} call {event.call_index}: "
-            f"-> {event.tool_name}"
+            f"-> {event.tool_name}, subtask:\n{_delegation_text(event.tool_input)}"
         )
 
     def on_delegation_done(self, event: ToolCallPostEvent) -> None:
         started = self.starts.pop((event.step, event.call_index), None)
         duration = time.perf_counter() - started if started is not None else 0.0
-        snippet = event.observation[:90].replace("\n", " ")
         self.log.append(
             f"step {event.step} call {event.call_index} {event.tool_name}: "
             f"{duration:.1f}s ok={event.succeeded}"
         )
         print(
             f"  [result]   step {event.step} call {event.call_index}: "
-            f"{event.tool_name} in {duration:.1f}s -> {snippet}"
+            f"{event.tool_name} in {duration:.1f}s ->\n{event.observation}"
         )
 
 
@@ -345,10 +356,6 @@ async def build_research_team(llm):
 
     # Determine what search capability we have
     has_brave_search = brave_registry is not None
-    has_google_search = (
-        settings.search_engine.google_cse_search_api
-        and settings.search_engine.google_cse_search_engine_id
-    )
 
     search_source = "none"
     researcher_tools = []
@@ -357,19 +364,11 @@ async def build_research_team(llm):
     if has_brave_search:
         search_source = "Brave Search (MCP/SSE)"
         researcher_mcp = brave_registry
-    elif has_google_search:
-        search_source = "Google CSE (local tool)"
-        web_search_config = {
-            "google_api_key": settings.search_engine.google_cse_search_api,
-            "google_search_engine_id": settings.search_engine.google_cse_search_engine_id,
-            "cache_ttl": settings.search_engine.web_search_cache_ttl,
-            "cache_max_size": settings.search_engine.web_search_cache_max_size,
-            "max_results": settings.search_engine.web_search_max_results,
-        }
-        researcher_tools.append(WebSearcherTool(config=web_search_config))
     else:
         print("    WARNING: No search capability available.")
-        print("    The Researcher will operate without web search tools.")
+        print("    The team runs without the Researcher: only the Analyst and")
+        print("    the Writer are delegable, so web research requests cannot be")
+        print("    answered in this run.")
 
     print(f"    Search source: {search_source}")
 
@@ -381,14 +380,17 @@ async def build_research_team(llm):
     # about a worker is team-specific yet.
     print_step(2, "Creating specialized worker agents")
 
-    # RESEARCHER: Uses MCP web search OR local Google CSE
+    # RESEARCHER: Uses MCP web search when the Brave server is reachable
     researcher = create_worker_agent(
         llm,
         researcher_tools,
         mcp_registry=researcher_mcp,
         max_steps=3,
     )
-    print(f"    Researcher agent ready [{search_source}]")
+    if has_brave_search:
+        print(f"    Researcher agent ready [{search_source}]")
+    else:
+        print("    Researcher agent built, but it has no search tool")
 
     # ANALYST: Uses SafeCalculatorTool for math
     analyst = create_worker_agent(
@@ -402,6 +404,10 @@ async def build_research_team(llm):
     writer = create_worker_agent(
         llm,
         [],  # No tools!
+        role=(
+            "You are a writer. You write the note the request asks for from the "
+            "figures and facts the request itself gives, and from nothing else."
+        ),
     )
     print("    Writer agent ready [no tools, LLM only]")
 
@@ -423,19 +429,27 @@ async def build_research_team(llm):
     #   barrier, because overlapping mutations can interleave badly.
     print_step(3, "Wrapping workers as typed tools (WorkerAgentTool)")
 
-    worker_tools = [
-        WorkerAgentTool(
-            researcher,
-            name="researcher",
-            description=(
-                "Delegate a web research subtask, phrased as a complete "
-                "question, to a research specialist that can search the web "
-                "for current prices, statistics, news, and facts. It cannot "
-                "do math and cannot write reports. It searches once and "
-                "returns what it finds."
-            ),
-            side_effect=SideEffect.READ_ONLY,
-        ),
+    worker_tools = []
+    if has_brave_search:
+        worker_tools.append(
+            WorkerAgentTool(
+                researcher,
+                name="researcher",
+                description=(
+                    "Delegate a web research subtask, phrased as a complete "
+                    "question, to a research specialist that can search the web "
+                    "for current prices, statistics, news, and facts. It cannot "
+                    "do math and cannot write reports. It searches once and "
+                    "returns what it finds."
+                ),
+                side_effect=SideEffect.READ_ONLY,
+            )
+        )
+    else:
+        # A researcher with no search tool would be advertised to the
+        # manager as a web searcher it is not, so it stays off the roster.
+        print("    researcher: left off the roster (no search tool to give it)")
+    worker_tools += [
         WorkerAgentTool(
             analyst,
             name="analyst",
@@ -521,7 +535,7 @@ async def build_research_team(llm):
     )
     print("    Manager ready: a plain SimpleAgent whose tools are the workers.")
 
-    return manager, brave_registry, reporter
+    return manager, brave_registry, reporter, has_brave_search
 
 
 # ==============================================================================
@@ -559,28 +573,66 @@ async def run_preset_demo(manager, reporter):
 
     print("\n  Manager memory (one observation per delegation, in call order):")
     for message in manager.memory.get_history():
-        if message.content.startswith(OBSERVATION_PREFIX):
+        if has_marker(message, OBSERVATION_MARKER_KEY):
             print(f"    {message.content[:140]}")
     return result
 
 
-async def run_interactive(manager):
+async def run_scripted_opening(manager, reporter):
+    """Run one request that needs no web search, so every run shows the team.
+
+    The two calculations are independent of each other, so the manager can
+    delegate both to the Analyst in one turn and the executor runs them in
+    parallel; the write-up needs both results, so the Writer is called in a
+    later turn.
+    """
+    print_section("SCRIPTED OPENING (no web search needed)")
+    query = (
+        "Two independent calculations: what is 15% of 8,500, and what is "
+        "8,500 divided by 12? Then have the writer turn both results into a "
+        "two-sentence budget note."
+    )
+    print(f"\n  Query: {query}")
+    print("  Expected numbers: 15% of 8,500 = 1275; 8,500 / 12 = 708.33 (rounded).")
+    print("-" * 70)
+
+    result = await manager.arun(query)
+
+    print("\n" + "=" * 70)
+    print("  FINAL REPORT")
+    print("=" * 70)
+    print(result)
+
+    print("\n  Delegations this run (from the event bus):")
+    for line in reporter.log:
+        print(f"    {line}")
+    reporter.log.clear()
+    return result
+
+
+async def run_interactive(manager, has_brave_search: bool):
     """Run in interactive mode, accepting queries from the user."""
     print_section("INTERACTIVE MODE")
     print("\n  The research team is ready for your queries!")
     print("  The team consists of:")
     print("    - Manager:    A plain SimpleAgent that delegates via worker tools")
-    print("    - Researcher: Searches the web for information")
+    if has_brave_search:
+        print("    - Researcher: Searches the web for information")
+    else:
+        print("    - (no Researcher: Brave Search is not available in this run)")
     print("    - Analyst:    Performs mathematical calculations")
     print("    - Writer:     Synthesizes findings into reports")
     print("\n  Example queries:")
-    print(
-        '    - "Find the price of Ethereum and calculate how many I can buy with $2,000"'
-    )
-    print('    - "Research the latest AI trends and write a brief summary"')
+    if has_brave_search:
+        print(
+            '    - "Find the price of Ethereum and calculate how many I can buy '
+            'with $2,000"'
+        )
+        print('    - "Research the latest AI trends and write a brief summary"')
+        print('    - "Separately: find the price of Bitcoin, and compute 5000 / 3.14"')
+        print("      (independent subtasks like these can fan out in one turn)")
     print('    - "What is 15% of 8,500?"')
-    print('    - "Separately: find the price of Bitcoin, and compute 5000 / 3.14"')
-    print("      (independent subtasks like these can fan out in one turn)")
+    print('    - "Compute 2,400 * 1.07 and write a one-line note about the result"')
     print("\n  Type 'exit' to quit.\n")
 
     while True:
@@ -601,9 +653,11 @@ async def run_interactive(manager):
             print(result)
             print()
 
-        except (KeyboardInterrupt, EOFError):
-            # Ctrl-C, or stdin closed (a pipe or CI run): stop cleanly
-            # instead of re-prompting forever.
+        except EOFError:
+            # stdin closed (a pipe or CI run): the input is finished.
+            print("\n\n  End of input. Goodbye!")
+            break
+        except KeyboardInterrupt:
             print("\n\n  Interrupted. Goodbye!")
             break
         except Exception as e:
@@ -621,7 +675,7 @@ async def main():
   manager.
 
   Classes demonstrated:
-    Core:      Message, Thought, Action, FinalAnswer, Document, settings
+    Core:      Message, Thought, Action, FinalAnswer, Document
     Prompts:   PromptBuilder, RoleDefinition (the worker tool catalog is
                auto-generated from the WorkerAgentTool schemas)
     Agents:    SimpleAgent, WorkerAgentTool, build_worker_manager
@@ -631,8 +685,7 @@ async def main():
     Events:    AgentEventBus, ToolBatchScheduledEvent, ToolCallPreEvent,
                ToolCallPostEvent
     MAL:       HuggingFaceAdapter (supports transformers v4 AND v5)
-    Tools:     ToolRegistry, ToolExecutor, SafeCalculatorTool,
-               WebSearcherTool, SideEffect
+    Tools:     ToolRegistry, ToolExecutor, SafeCalculatorTool, SideEffect
     MCP:       MCPServerConfig, CompositeToolRegistry, MCPToolRegistry
     """)
 
@@ -658,13 +711,20 @@ async def main():
     # ------------------------------------------------------------------
     # Build and run the team
     # ------------------------------------------------------------------
-    manager, brave_registry, reporter = await build_research_team(llm)
+    manager, brave_registry, reporter, has_brave_search = await build_research_team(llm)
+
+    # The scripted opening needs no web search, so it runs on every machine.
+    await run_scripted_opening(manager, reporter)
 
     # Choose mode based on command-line args
     if "--preset" in sys.argv:
-        await run_preset_demo(manager, reporter)
+        if has_brave_search:
+            await run_preset_demo(manager, reporter)
+        else:
+            print("\n  --preset needs web search (the Bitcoin price); Brave Search")
+            print("  is not available, so the preset query is skipped.")
     else:
-        await run_interactive(manager)
+        await run_interactive(manager, has_brave_search)
 
     # ------------------------------------------------------------------
     # Cleanup MCP connections

@@ -9,9 +9,20 @@ questions - one per file in the tree - each answerable only by navigating: find
 where something lives, open it, and report what it found. The agent is not told
 where any answer lives; it has to scan, narrow, and read, which is exactly the
 agentic-search loop these tools exist to support (Anthropic's recommended
-default before reaching for embeddings). The questions form one contiguous
-conversation on a single agent, so it can build on what it already found for
-earlier questions rather than rediscovering the tree every time.
+default before reaching for embeddings). Each question starts from a fresh
+working memory, so the agent navigates from nothing every time instead of
+answering from what an earlier question turned up.
+
+A named format instruction, survey_first, carries the one search-strategy
+rule the loop needs beyond the tools themselves: survey every path in the
+tree before narrowing, because a guessed name that matches nothing is not
+proof that the thing is absent. The model decodes greedily, so a run is
+repeatable.
+
+The demo subscribes to the agent's event bus and prints every tool call as it
+happens: the tool, the input it received, and the first line of what it
+returned. When the planner reads a tool_input the model wrote as field=value
+text into the tool's fields, the ToolInputRepairedEvent is printed too.
 """
 
 import asyncio
@@ -19,15 +30,19 @@ import tempfile
 from pathlib import Path
 
 from fairlib import (
+    AgentEventBus,
     GlobTool,
     GrepTool,
     HuggingFaceAdapter,
     ListDirTool,
+    MaxStepsExceeded,
+    ReActPlanner,
     ReadFileTool,
     RoleDefinition,
     SimpleAgent,
-    SimpleReActPlanner,
+    ToolCallPostEvent,
     ToolExecutor,
+    ToolInputRepairedEvent,
     ToolRegistry,
     WorkingMemory,
 )
@@ -78,6 +93,22 @@ QUESTIONS = [
 ]
 
 
+def on_tool_call(event: ToolCallPostEvent) -> None:
+    """Print one tool call: the tool, its input, and what it returned, whole."""
+    status = "ok" if event.succeeded else "failed"
+    print(
+        f"  [{event.tool_name}] {event.tool_input!r} -> {status}:\n{event.observation}"
+    )
+
+
+def on_input_read(event: ToolInputRepairedEvent) -> None:
+    """Print a tool_input the planner read from field=value text."""
+    print(
+        f"  [input read] {event.tool_name}: {event.original_text!r} -> "
+        f"{event.repaired_text}"
+    )
+
+
 def build_fixture(root: Path) -> None:
     """Write the sample project tree under root."""
     for relative, content in FIXTURE_FILES.items():
@@ -92,7 +123,10 @@ async def main():
     print(
         f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
     )
-    llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
+    # Greedy decoding (do_sample=False): a navigation loop needs the model's
+    # most likely next step every time, not a sampled one; sampling lets a
+    # run skip the survey and conclude early on some runs and not others.
+    llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512, do_sample=False)
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -113,30 +147,61 @@ async def main():
 
         executor = ToolExecutor(registry)
 
-        planner = SimpleReActPlanner(llm, registry)
+        # The JSON ReActPlanner: the 14B follows the survey rule and reads its
+        # observations more reliably in JSON turns than in key-value ones.
+        planner = ReActPlanner(llm, registry)
         planner.prompt_builder.role_definition = RoleDefinition(
             "You are a codebase navigator. You answer questions about a project "
             "by searching its files. Work one step at a time: list or glob to "
             "find candidates, grep to locate a symbol, and read the few files "
-            "that matter before answering. Do not guess paths you have not seen. "
-            "Pass each tool a single bare value as tool_input, never a 'field: "
-            "value' pair: to grep for compute_total, write 'tool_input: "
-            "compute_total', not 'tool_input: pattern: compute_total'."
+            "that matter before answering. Do not guess paths you have not seen."
+        )
+        # The search strategy, named so it can be read or overridden on its
+        # own: survey the tree before narrowing. A glob or grep that guesses a
+        # name and finds nothing proves only that the guess was wrong, and a
+        # small model reads that as proof the thing is absent.
+        planner.prompt_builder.set_format_instruction(
+            "survey_first",
+            "Begin every question by calling glob with the pattern **/* to see "
+            "every file path in the project. Then choose every file whose path "
+            "or name could fit the question, open each with read_file, and "
+            "answer only from what those files say. Never conclude that "
+            "something is absent until you have read every file whose path or "
+            "name could hold it.",
+        )
+        # What an answer carries: the path of every file it draws on, so a
+        # reader can check it, even when the question names the file.
+        planner.prompt_builder.set_format_instruction(
+            "answer_names_paths",
+            "Your final answer names the path of every file it draws on, even "
+            "when the question already names that file.",
         )
 
-        agent = SimpleAgent(
-            llm=llm,
-            planner=planner,
-            tool_executor=executor,
-            memory=WorkingMemory(),
-            max_steps=12,
-        )
+        # One bus for every question's agent: the executor is shared, and an
+        # executor serves one bus, so the ticker subscribes once.
+        bus = AgentEventBus()
+        bus.subscribe(ToolCallPostEvent, on_tool_call)
+        bus.subscribe(ToolInputRepairedEvent, on_input_read)
 
         for index, question in enumerate(QUESTIONS, start=1):
             print("=" * 60)
             print(f"Question {index}/{len(QUESTIONS)}:\n  {question}\n")
             print("Running agentic search...\n")
-            answer = await agent.arun(question)
+            # A fresh agent and working memory per question: nothing found for
+            # an earlier question is in context, so each answer is navigated.
+            agent = SimpleAgent(
+                llm=llm,
+                planner=planner,
+                tool_executor=executor,
+                memory=WorkingMemory(),
+                max_steps=12,
+                events=bus,
+            )
+            try:
+                answer = await agent.arun(question)
+            except MaxStepsExceeded as exc:
+                print(f"Agent could not finish: {type(exc).__name__}: {exc}")
+                continue
             print("Agent answer:")
             print(answer)
         print("=" * 60)

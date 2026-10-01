@@ -6,7 +6,7 @@ api_keys: {}
 models:
   default:
     provider: huggingface
-    model_name: dolphin3-qwen25-3b
+    model_name: qwen25-7b
 default_model: default
 
 limits:

@@ -34,7 +34,8 @@ def show(usage: Optional[Usage]) -> None:
     print(f"  completion tokens: {usage.completion_tokens}")
     print(f"  total duration:    {usage.total_duration_ms:.0f} ms")
     print(f"  model:             {usage.model}")
-    print(f"  done_reason:       {usage.done_reason} (raw: {usage.raw_done_reason!r})")
+    done_reason = usage.done_reason.value if usage.done_reason is not None else None
+    print(f"  done_reason:       {done_reason} (raw: {usage.raw_done_reason!r})")
 
 
 def main() -> None:

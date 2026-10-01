@@ -1,113 +1,113 @@
 # demo_model_comparison.py
 """
-This module provides a tutorial on comparing the outputs of different Large
-Language Models (LLMs) for the same task, showcasing the power of the framework's
-Model Abstraction Layer (MAL).
+Compare several models on the same task through the Model Abstraction Layer.
+
+Every model here is reached through AbstractChatModel, so the agent code is
+identical for all of them: one factory builds the same tool-free ReAct agent
+around each model, every agent gets the same prompt, and the answers print
+side by side. Only the line that constructs each adapter names a provider.
+
+The comparison always runs two local instruct models of different sizes
+(Qwen2.5 7B and 14B through the HuggingFaceAdapter). When GEMINI_API_KEY is
+exported, a hosted Gemini model joins as a third column, which shows the same
+agent running unchanged across providers.
+
+Run:
+    PYTHONPATH=. python demos/demo_model_comparison.py
+Requires a GPU for the local models; GEMINI_API_KEY is optional.
 """
 
 import asyncio
+import os
+import time
 from typing import Dict
 
 from fairlib import (
+    GeminiAdapter,
     HuggingFaceAdapter,
     ReActPlanner,
+    RoleDefinition,
     SimpleAgent,
     ToolExecutor,
     ToolRegistry,
     WorkingMemory,
 )
 from fairlib.core.errors import FairlibError
-from fairlib.core.interfaces.llm import (
-    AbstractChatModel,
-)  # Keep interface for type hinting
+from fairlib.core.interfaces.llm import AbstractChatModel
+
+LOCAL_MODELS = ("qwen25-7b", "qwen25-14b")
+GEMINI_MODEL = os.environ.get("FAIR_LLM_DEMO_GEMINI", "gemini-3.6-flash")
 
 
-# --- Step 2: Create a simple factory to build agents ---
-# This helps keep our code clean when creating multiple identical agents.
 def create_comparison_agent(
     llm: AbstractChatModel, role_description: str
 ) -> SimpleAgent:
-    """Creates a basic agent with no tools for text generation comparison."""
-    # An agent with no tools will rely entirely on its LLM for responses.
+    """Build a tool-free agent; only the model differs between agents."""
     tool_registry = ToolRegistry()
     executor = ToolExecutor(tool_registry)
     memory = WorkingMemory()
-    # Even with no tools, the ReActPlanner effectively prompts the LLM to give a direct answer.
+    # With no tools the ReActPlanner's instructions still ask for a
+    # final_answer turn, so the answer comes back through the normal loop.
     planner = ReActPlanner(llm, tool_registry)
 
-    agent = SimpleAgent(llm, planner, executor, memory)
-    agent.role_description = role_description
-    return agent
+    # The role reaches the model through the planner's prompt builder, the
+    # seam every planner renders its system prompt from.
+    planner.prompt_builder.role_definition = RoleDefinition(role_description)
+    return SimpleAgent(llm, planner, executor, memory)
 
 
-async def main():
-    """The main function to set up and run the model comparison."""
+async def timed_run(agent: SimpleAgent, prompt: str) -> tuple[object, float]:
+    """Run one agent and return its answer (or typed failure) and seconds taken."""
+    started = time.perf_counter()
+    try:
+        answer: object = await agent.arun(prompt)
+    except FairlibError as exc:
+        # A typed failure is itself a comparison result worth displaying.
+        answer = exc
+    return answer, time.perf_counter() - started
 
-    # --- Step 3: Dynamically Initialize LLMs from Settings ---
-    # This section demonstrates the plug-and-play nature of the MAL.
-    # We will try to initialize every model the user has configured
-    # in their settings.yml file.
-    print("Initializing configured models from settings...")
 
+async def main() -> None:
+    """Build one agent per model, give them one prompt, print the answers."""
+    print("Initializing models...")
     models: Dict[str, AbstractChatModel] = {}
+    for alias in LOCAL_MODELS:
+        print(f"  local  {alias} (HuggingFaceAdapter)")
+        models[alias] = HuggingFaceAdapter(alias, max_new_tokens=512)
+    if os.environ.get("GEMINI_API_KEY"):
+        print(f"  hosted {GEMINI_MODEL} (GeminiAdapter)")
+        models[GEMINI_MODEL] = GeminiAdapter(model_name=GEMINI_MODEL, timeout=60)
+    else:
+        print("  GEMINI_API_KEY is not set; the hosted column is skipped.")
 
-    # initialize models for comparison
-    models["dolphin3-qwen25-3b"] = HuggingFaceAdapter("dolphin3-qwen25-3b")
-    models["dolphin3-qwen25-0.5b"] = HuggingFaceAdapter("dolphin3-qwen25-0.5b")
-
-    if not models:
-        print(
-            "\nNo valid models were initialized. Please check your API keys and configuration in `config/settings.yml`."
-        )
-        return
-
-    # --- Step 4: Create an Identical Agent for Each Model ---
-    print("\nCreating an agent for each initialized model...")
-    # descriptive role to give to each agent
     # The role sets personality only. The planner owns the response format:
     # its rendered instructions already tell the model to deliver the poem
-    # through a final_answer turn, and role text that contradicts the
-    # planner contract (for example forbidding JSON) makes weak models fail
-    # every turn.
+    # through a final_answer turn.
     role = (
         "You are a creative poet. You have no tools; when asked for a poem, "
         "deliver the finished poem itself as your final answer."
     )
-
     agents = {
         name: create_comparison_agent(model, role) for name, model in models.items()
     }
 
-    # --- Step 5: Define a Subjective Prompt ---
-    # A creative task is best for seeing differences in model "personality".
     prompt = "Write a short, four-line poem about a lighthouse in a storm."
-    print(f"\n--- Giving all agents the same prompt: ---\n'{prompt}'\n")
+    print(f"\nSame prompt for every agent:\n  {prompt}\n")
 
-    # --- Step 6: Run All Agents in Parallel ---
-    # return_exceptions keeps one model's failure from cancelling the
-    # comparison: a weak model failing typed (PlannerParseError,
-    # MaxStepsExceeded) is itself a comparison result worth displaying.
-    tasks = [agent.arun(prompt) for agent in agents.values()]
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    # All agents run concurrently; each one's failure stays its own result.
+    runs = await asyncio.gather(*(timed_run(a, prompt) for a in agents.values()))
 
-    results = dict(zip(agents.keys(), responses))
-
-    # --- Step 7: Display the Side-by-Side Comparison ---
-    print("--- Model Comparison Results ---")
-    for model_name, response in results.items():
-        print("\n=====================================")
-        print(f"   Model: {model_name}")
-        print("=====================================")
-        if isinstance(response, FairlibError):
-            print(f"FAILED ({type(response).__name__}): {response}")
-        elif isinstance(response, BaseException):
-            raise response
+    print("--- Model comparison ---")
+    for name, (answer, seconds) in zip(agents, runs):
+        print(f"\n=== {name} ({type(models[name]).__name__}, {seconds:.1f}s) ===")
+        if isinstance(answer, FairlibError):
+            print(f"FAILED ({type(answer).__name__}): {answer}")
         else:
-            print(response)
-        print("-------------------------------------")
+            # The poem is printed exactly as the model wrote it. A stray
+            # backslash or a literal \n at a line end is the model's own
+            # escaping inside its answer, not something the framework added.
+            print(answer)
 
 
 if __name__ == "__main__":
-    # To get the most out of this demo, ensure you have API keys for
-    # both OpenAI and Anthropic in your config/settings.yml file.
     asyncio.run(main())

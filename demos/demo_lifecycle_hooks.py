@@ -7,8 +7,13 @@ Unlike the event bus (observe-only), lifecycle hooks can intercept,
 modify, or veto actions at pre-model, pre-tool, and post-tool points.
 This demo uses a real local model and a real calculator tool - the same
 wiring a cadet would copy into an application. A pre-tool hook blocks
-non-calculator tools; a post-tool hook appends an audit label to every
-observation. Watch LifecycleHookEvent ticker lines on the event bus.
+every tool but the calculator; a post-tool hook appends an audit label to
+every observation. Two turns run: an arithmetic question, whose calculator
+observation comes back audit-labelled, and a weather question, whose
+weather_lookup call the pre-tool hook blocks before the tool runs. Each
+turn prints its LifecycleHookEvent ticker lines from the event bus and the
+observations the agent's memory holds, so the modified and the blocked
+observation are both visible.
 
 Requirements: a local HuggingFace model (transformers; a GPU is
 recommended). The first run may download weights. Set FAIR_LLM_DEMO_MODEL
@@ -20,6 +25,8 @@ Run:
 
 import asyncio
 import os
+
+from pydantic import BaseModel, Field
 
 from fairlib import (
     CallableLifecycleHooks,
@@ -36,15 +43,45 @@ from fairlib import (
     ToolRegistry,
     WorkingMemory,
 )
+from fairlib.core.interfaces.tools import (
+    AbstractTool,
+    SideEffect,
+    TextResult,
+    ToolOutput,
+)
+from fairlib.core.message import OBSERVATION_MARKER_KEY, has_marker
 
 # Default matches demos/demo_single_agent_calculator.py; override with
 # FAIR_LLM_DEMO_MODEL for a stronger instruct model if needed.
-MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
+
+
+class CityInput(BaseModel):
+    city: str = Field(description="The city to look up.")
+
+
+class WeatherLookupTool(AbstractTool):
+    """A registered tool the application's policy does not allow.
+
+    It is in the registry, so the model sees it in the catalog and may call
+    it; the pre-tool hook is what stops the call before it runs.
+    """
+
+    name = "weather_lookup"
+    description = "Returns the current weather for a city."
+    input_schema = CityInput
+    output_schema = TextResult
+    side_effect = SideEffect.READ_ONLY
+
+    async def acall(self, tool_input: CityInput) -> ToolOutput:
+        return TextResult(result=f"Sunny and 21 C in {tool_input.city}.")
 
 
 async def allow_calculator_only(ctx: PreToolHookContext) -> HookResult:
     if ctx.tool_name != "safe_calculator":
-        return HookResult.veto(f"tool {ctx.tool_name!r} is not allowed")
+        return HookResult.veto(
+            f"blocked by policy: only safe_calculator may run, not {ctx.tool_name!r}"
+        )
     return HookResult.proceed_default()
 
 
@@ -69,15 +106,16 @@ async def main() -> None:
 
     tool_registry = ToolRegistry()
     tool_registry.register_tool(SafeCalculatorTool())
+    tool_registry.register_tool(WeatherLookupTool())
 
     planner = SimpleReActPlanner(llm, tool_registry)
     planner.prompt_builder.role_definition = RoleDefinition(
         "You are an expert mathematical calculator. Your job is to perform "
         "mathematical calculations.\n"
         "You reason step-by-step to determine the best course of action. "
-        "When you call safe_calculator, pass only a pure arithmetic "
-        "expression in the expression field (for example '12 * 7'), with "
-        "no words or question marks. Keep final answers short."
+        "Use safe_calculator for the arithmetic. For a weather question, "
+        "call weather_lookup. If a tool call is blocked, say so in your "
+        "final answer. Keep final answers short."
     )
 
     hooks = CallableLifecycleHooks(
@@ -95,12 +133,26 @@ async def main() -> None:
     )
     agent.events.subscribe(LifecycleHookEvent, _on_hook)
 
-    question = "What is 12 * 7?"
-    print(f"You: {question}")
-    print("Running gather -> hook -> act -> hook...")
-    answer = await agent.arun(question)
-    print(f"Agent: {answer}")
-    print("Lifecycle hooks demo complete.")
+    questions = (
+        ("Allowed tool: the post-tool hook labels the observation", "What is 12 * 7?"),
+        (
+            "Blocked tool: the pre-tool hook vetoes the call before it runs",
+            "What is the weather in Denver right now?",
+        ),
+    )
+    for title, question in questions:
+        print(f"\n=== {title} ===")
+        print(f"You: {question}")
+        # The two questions are independent, so each starts from a clean
+        # history.
+        agent.memory.clear()
+        answer = await agent.arun(question)
+        print("  Observations this turn, as memory holds them:")
+        for message in agent.memory.get_history():
+            if has_marker(message, OBSERVATION_MARKER_KEY):
+                print(f"    {message.content}")
+        print(f"Agent: {answer}")
+    print("\nLifecycle hooks demo complete.")
 
 
 if __name__ == "__main__":

@@ -36,11 +36,19 @@ The committee:
 
 1. The grading manager (the lead instructor):
    - A plain SimpleAgent over the worker tools; no special orchestrator
-     class. It delegates subtasks and synthesizes the final report.
+     class. It delegates subtasks and calls the grading tool. It never
+     copies the essay: the demo keeps the essay and the rubric in a case
+     file, each seat's WorkerAgentTool attaches the essay to the subtask
+     (the _compose_task extension point), and the committee's reports are
+     filed into the case file off the event bus as each delegation
+     completes. A long essay copied through a JSON tool_input is what a
+     model cannot reproduce or escape reliably, so none of the case data
+     travels that way.
 
 2. content_analyst (the subject matter expert):
    - Focuses exclusively on the essay's content, analyzing the strength of
-     arguments, the quality of evidence, and the depth of analysis.
+     arguments, the quality of evidence, and the depth of analysis. Its
+     subtask also carries the committee reports already on file.
 
 3. fact_checker (the research assistant - RAG powered):
    - When provided with course materials (lecture notes, textbooks), this
@@ -54,10 +62,13 @@ The committee:
      accuracy to focus purely on communication quality.
 
 5. rubric_aligner (the detail-oriented TA):
-   - This is the key to fair and consistent grading. It takes the analyses
-     from all other agents and its sole job is to fill out a structured
-     JSON form based on the specific criteria in the instructor's rubric.
-     This forces the AI to justify every point awarded, ensuring transparency.
+   - This is the key to fair and consistent grading: the
+     grade_essay_from_rubric tool itself, bound to the case file. It fills
+     out a structured JSON form from the instructor's rubric, the essay and
+     every committee report on file, which forces the AI to justify every
+     point awarded, and it refuses, typed, while a report is missing. Every
+     field of its form is case data, so no agent sits between the manager
+     and the tool to copy it.
 
 What it shows:
   - WorkerAgentTool adapts each grader into a typed tool; the tool
@@ -70,6 +81,9 @@ What it shows:
     conservative EXTERNAL default and act as a sequential barrier.
   - Workers stay ordinary stateless SimpleAgents with their own planners
     and tools - the same agents you would build standalone.
+  - Each seat has its own event bus, and the demo prints every tool call,
+    every planner parse error (with the raw model output) and every loop
+    guard per seat, so a run shows who did what.
 
 The manager is driven by a real local model, so the delegation order is the
 model's own decision each run; the workflow in the prompt guides it, and an
@@ -118,22 +132,37 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ValidationError
 
 from fairlib import (
     AgentEventBus,
+    Example,
+    FinalGrade,
     GradeEssayFromRubricTool,
     HuggingFaceAdapter,
+    PromptBuilder,
     RAGQueryTool,
+    RoleDefinition,
     SimpleAgent,
     SimpleRetriever,
     WorkerAgentTool,
     build_worker_manager,
 )
-from fairlib.core.events import ToolCallPostEvent
+from fairlib.core.errors import ToolInvocationError
+from fairlib.core.events import (
+    LoopGuardTrippedEvent,
+    PlannerParseErrorEvent,
+    ToolBatchScheduledEvent,
+    ToolCallPostEvent,
+    ToolCallPreEvent,
+)
 from fairlib.core.interfaces.llm import AbstractChatModel
-from fairlib.core.interfaces.tools import AbstractTool, SideEffect
+from fairlib.core.interfaces.tools import AbstractTool, SideEffect, ToolOutput
+from fairlib.modules.action.tools.grading_tool import GradeEssayInput
 from fairlib.utils.autograder_utils import (
     create_agent,
     format_report,
@@ -141,8 +170,23 @@ from fairlib.utils.autograder_utils import (
 )
 from fairlib.utils.document_processor import DocumentProcessor
 
+
+def _delegation_text(tool_input: object) -> str:
+    """A delegation's input as the model wrote it: the subtask alone, or JSON."""
+    if isinstance(tool_input, dict) and set(tool_input) == {"subtask"}:
+        return str(tool_input["subtask"])
+    if isinstance(tool_input, (dict, list)):
+        return json.dumps(tool_input)
+    return str(tool_input)
+
+
 # Configure logger for this specific module
 logger = logging.getLogger(__name__)
+
+# The committee seats whose reports the manager files into the case file.
+COMMITTEE_SEATS = frozenset(
+    {"fact_checker", "clarity_style_checker", "content_analyst"}
+)
 
 
 # Step 2: Committee construction. Each grader is an ordinary stateless
@@ -151,7 +195,8 @@ logger = logging.getLogger(__name__)
 # delegation must be planned fresh, not against the history of the previous
 # essay's delegations. The manager model learns what each grader is for from
 # the WorkerAgentTool description in its rendered tool catalog, so the
-# role_description shapes only the grader itself.
+# role_description is the grader's own role definition, the role its model is
+# prompted with.
 def create_grader(
     llm: AbstractChatModel,
     role_description: str,
@@ -162,39 +207,195 @@ def create_grader(
     return create_agent(llm, role_description, tools, stateless=True, events=events)
 
 
-# Step 3: Main Essay Grading Orchestration
-async def grade_single_essay(essay_doc, rubric, knowledge_base):
+def _watch_seat(bus: AgentEventBus, seat: str) -> AgentEventBus:
+    """Print one seat's tool calls, parse errors and loop guards, labelled."""
+
+    def _pre(event: ToolCallPreEvent) -> None:
+        print(f"[{seat}] call {event.tool_name}:\n{_delegation_text(event.tool_input)}")
+
+    def _post(event: ToolCallPostEvent) -> None:
+        status = "ok" if event.succeeded else "FAILED"
+        print(f"[{seat}] {event.tool_name} {status}:\n{event.observation}")
+
+    def _parse_error(event: PlannerParseErrorEvent) -> None:
+        raw = event.raw_output or ""
+        print(
+            f"[{seat}] planner parse error (attempt {event.attempt}, "
+            f"retry={event.will_retry}, truncated={event.truncated}, "
+            f"{len(raw)} chars):\n{raw}"
+        )
+
+    def _guard(event: LoopGuardTrippedEvent) -> None:
+        print(
+            f"[{seat}] loop guard {event.guard_type.value} tripped at step {event.step}"
+        )
+
+    bus.subscribe(ToolCallPreEvent, _pre)
+    bus.subscribe(ToolCallPostEvent, _post)
+    bus.subscribe(PlannerParseErrorEvent, _parse_error)
+    bus.subscribe(LoopGuardTrippedEvent, _guard)
+    return bus
+
+
+def _on_schedule(event: ToolBatchScheduledEvent) -> None:
+    """Show how the executor grouped the turn's delegations."""
+    print(f"[scheduler] {event.batch_size} delegation(s) in this turn:")
+    for i, group in enumerate(event.groups, start=1):
+        how = "PARALLEL" if group.parallel else "sequential"
+        print(
+            f"  group {i}: {how:11} [{group.side_effect.value}] {', '.join(group.tool_names)}"
+        )
+
+
+# Step 3: The case file and the case-bound committee pieces
+@dataclass
+class CaseFile:
+    """Everything the demo knows about one essay, held outside any model.
+
+    The essay and the rubric are data the demo already has, so no model
+    ever copies them into a JSON tool_input: the committee seats receive the
+    essay from here with each delegation, and the grading tool reads the
+    rubric, the essay and the reports from here. The committee's reports
+    land here off the event bus as each delegation completes.
+    """
+
+    name: str
+    essay: str
+    rubric: str
+    reports: Dict[str, str] = field(default_factory=dict)
+
+    def brief(
+        self, subtask: str, *, with_rubric: bool = False, with_reports: bool = False
+    ) -> str:
+        """The manager's subtask with the essay (and the rubric or reports) attached."""
+        parts = [subtask, f"Essay under review ({self.name}):\n{self.essay}"]
+        if with_rubric:
+            parts.append(f"Grading rubric:\n{self.rubric}")
+        if with_reports:
+            filed = "\n\n".join(
+                f"Report from {seat}:\n{text}" for seat, text in self.reports.items()
+            )
+            parts.append(
+                "Committee reports on file so far:\n" + (filed or "(none yet)")
+            )
+        return "\n\n".join(parts)
+
+
+class CaseSeat(WorkerAgentTool):
+    """A committee seat whose every delegation carries the essay.
+
+    _compose_task is WorkerAgentTool's extension point for the task text:
+    the manager writes only what to do, and the case file supplies the essay
+    (and, for a seat that judges against the rubric or builds on the others,
+    the rubric and their reports).
+    """
+
+    def __init__(
+        self,
+        worker: SimpleAgent,
+        case: CaseFile,
+        *,
+        with_rubric: bool = False,
+        with_reports: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(worker, **kwargs)
+        self._case = case
+        self._with_rubric = with_rubric
+        self._with_reports = with_reports
+
+    def _compose_task(self, tool_input: BaseModel) -> str:
+        return self._case.brief(
+            super()._compose_task(tool_input),
+            with_rubric=self._with_rubric,
+            with_reports=self._with_reports,
+        )
+
+
+class CaseToolInput(BaseModel):
+    """A case-bound tool takes no input: the case file holds all it reads."""
+
+
+class GradeCaseTool(GradeEssayFromRubricTool):
+    """GradeEssayFromRubricTool bound to the case file: the rubric aligner's seat.
+
+    Every input of the grading form is case data (the rubric, the essay and
+    the committee reports), so the tool reads them itself. It refuses,
+    typed, while a report is missing, so the manager learns what to
+    delegate.
+    """
+
+    input_schema = CaseToolInput
+    description = (
+        "Fills the rubric for the essay under review as a structured JSON "
+        "grade, from the rubric, the essay and every committee report on "
+        "file. Call it once every report is in; it needs no input."
+    )
+
+    def __init__(
+        self, llm: AbstractChatModel, case: CaseFile, required: List[str]
+    ) -> None:
+        super().__init__(llm)
+        self._case = case
+        self._required = required
+
+    async def acall(self, tool_input: CaseToolInput) -> ToolOutput:
+        missing = [seat for seat in self._required if seat not in self._case.reports]
+        if missing:
+            raise ToolInvocationError(
+                f"The case file has no report yet from {', '.join(missing)}; "
+                "delegate to them before grading.",
+                tool_name=self.name,
+            )
+        reports = self._case.reports
+        return await super().acall(
+            GradeEssayInput(
+                rubric=self._case.rubric,
+                content_feedback=reports["content_analyst"],
+                style_feedback=reports["clarity_style_checker"],
+                fact_check_results=reports.get(
+                    "fact_checker", "No course materials were provided."
+                ),
+                essay=self._case.essay,
+            )
+        )
+
+
+# Step 4: Main Essay Grading Orchestration
+async def grade_single_essay(
+    llm: AbstractChatModel, essay_doc, rubric, knowledge_base, label: str
+):
     """
     Orchestrates the entire multi-agent grading process for one essay.
     This function sets up the agent committee and the manager prompt.
+
+    The committee sees the essay only under its anonymous label (for
+    example "Essay 1"), never its file name, so a name such as
+    student1_excellent cannot reach a reviewer and bias the grade.
     """
-    essay_text = essay_doc.page_content
     essay_filename = Path(essay_doc.metadata.get("source", "unknown_essay")).name
-    logger.info(f"--- Starting essay grading for: {essay_filename} ---")
+    print(f"\n=== Grading {label} ({essay_filename}) ===")
+    case = CaseFile(name=label, essay=essay_doc.page_content, rubric=rubric)
 
-    # The manager inlines the essay and committee reports into delegation
-    # payloads under the strict multi-action JSON contract; that needs a
-    # capable instruct model and enough tokens that the longest essay does
-    # not truncate mid-JSON. Override with FAIR_LLM_DEMO_MODEL to
-    # experiment.
-    llm = HuggingFaceAdapter(
-        os.environ.get("FAIR_LLM_DEMO_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
-        max_new_tokens=2048,
-    )
-
-    # One shared bus, wired before the committee exists: the rubric
-    # aligner's own executor publishes the grading tool's typed result, so
-    # the demo captures the structured grade at its source instead of
-    # trusting the manager model to echo JSON verbatim (consumers subscribe
-    # to typed events; they do not parse them back out of model text).
-    bus = AgentEventBus()
+    # One bus per seat, each printing its seat's tool calls and parse
+    # errors. The manager's bus also files every completed report into the
+    # case file and captures the grading tool's typed result, so the demo
+    # takes the structured grade at its source instead of trusting the
+    # manager model to echo JSON verbatim (consumers subscribe to typed
+    # events; they do not parse them back out of model text).
+    bus = _watch_seat(AgentEventBus(), "manager")
+    bus.subscribe(ToolBatchScheduledEvent, _on_schedule)
     structured_grades: List[str] = []
 
-    def _capture_grade(event: ToolCallPostEvent) -> None:
-        if event.tool_name == "grade_essay_from_rubric" and event.succeeded:
+    def _file_report(event: ToolCallPostEvent) -> None:
+        if not event.succeeded:
+            return
+        if event.tool_name == GradeCaseTool.name:
             structured_grades.append(event.observation)
+        elif event.tool_name in COMMITTEE_SEATS:
+            case.reports[event.tool_name] = event.observation
 
-    bus.subscribe(ToolCallPostEvent, _capture_grade)
+    bus.subscribe(ToolCallPostEvent, _file_report)
 
     # Create the Grading Committee: each specialist is a stateless
     # SimpleAgent wrapped as a typed tool. Every grader is READ_ONLY - they
@@ -203,85 +404,167 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     # turn run concurrently. A grader that wrote files or updated a
     # gradebook would keep WorkerAgentTool's conservative EXTERNAL default
     # and run as a sequential barrier instead.
-    worker_tools = []
+    worker_tools: List[AbstractTool] = []
+    required_reports = ["clarity_style_checker", "content_analyst"]
 
     # Conditionally create the fact checker only if materials were provided.
     if knowledge_base:
         fact_checker = create_grader(
             llm,
-            "A research assistant. Use the 'search_knowledge_base' tool to "
-            "verify claims made in a text against the course materials.",
+            "A research assistant. Pick the essay's three to five central "
+            "factual claims and verify each with one 'search_knowledge_base' "
+            "query against the course materials. Then give, as your final "
+            "answer, a verdict per claim: supported, contradicted, or not "
+            "covered by the materials.",
             [RAGQueryTool(SimpleRetriever(knowledge_base.vector_store))],
+            events=_watch_seat(AgentEventBus(), "fact_checker"),
         )
         worker_tools.append(
-            WorkerAgentTool(
+            CaseSeat(
                 fact_checker,
+                case,
                 name="fact_checker",
                 description=(
-                    "Delegate a fact-checking subtask: give this research "
-                    "assistant the claims to verify and it checks them "
-                    "against the course materials via RAG retrieval."
+                    "Delegate fact-checking to a research assistant who "
+                    "verifies the essay's claims against the course "
+                    "materials via RAG retrieval. The essay is attached to "
+                    "the subtask for you."
                 ),
                 side_effect=SideEffect.READ_ONLY,
             )
         )
+        required_reports.insert(0, "fact_checker")
 
     content_analyst = create_grader(
         llm,
-        "A university professor. Analyze the essay's content for strength "
-        "of argument, quality of evidence, and depth of analysis.",
+        "A university professor. Judge the essay's content critically "
+        "against the rubric you are given: the strength of the argument, the "
+        "quality and specificity of the evidence, the use of course concepts "
+        "and IPCC findings, the depth across environmental, social and "
+        "economic dimensions and equity, and the solutions it discusses. "
+        "Take any committee reports you are given into account. Name concrete "
+        "strengths and concrete weaknesses, and say how well the essay meets "
+        "each content criterion, as your final answer.",
+        events=_watch_seat(AgentEventBus(), "content_analyst"),
     )
     clarity_checker = create_grader(
         llm,
-        "A university writing tutor. Analyze the essay's grammar, clarity, and style.",
-    )
-    rubric_aligner = create_grader(
-        llm,
-        "A teaching assistant. Use the 'grade_essay_from_rubric' tool to "
-        "generate the final grade.",
-        [GradeEssayFromRubricTool(llm)],
-        events=bus,
+        "A university writing tutor. Judge the essay's grammar, spelling, "
+        "sentence structure, paragraphing, academic tone and citations "
+        "critically, quoting concrete errors, and say how well it meets the "
+        "rubric's writing and citation criteria, as your final answer.",
+        events=_watch_seat(AgentEventBus(), "clarity_style_checker"),
     )
     worker_tools.extend(
         [
-            WorkerAgentTool(
+            CaseSeat(
                 content_analyst,
+                case,
+                with_rubric=True,
+                with_reports=True,
                 name="content_analyst",
                 description=(
-                    "Delegate a content-analysis subtask: include the essay text "
-                    "and any earlier committee reports, and this professor "
-                    "evaluates argument strength, evidence, and depth."
+                    "Delegate content analysis to a professor who evaluates "
+                    "argument strength, evidence, and depth. The essay, the "
+                    "rubric and the committee reports on file are attached "
+                    "to the subtask for you."
                 ),
                 side_effect=SideEffect.READ_ONLY,
             ),
-            WorkerAgentTool(
+            CaseSeat(
                 clarity_checker,
+                case,
+                with_rubric=True,
                 name="clarity_style_checker",
                 description=(
-                    "Delegate a writing-quality subtask: include the essay text, "
-                    "and this writing tutor reports on grammar, clarity, and "
-                    "style only, ignoring content accuracy."
+                    "Delegate a writing-quality review to a writing tutor who "
+                    "reports on grammar, clarity, and style only, ignoring "
+                    "content accuracy. The essay and the rubric are attached "
+                    "to the subtask for you."
                 ),
                 side_effect=SideEffect.READ_ONLY,
             ),
-            WorkerAgentTool(
-                rubric_aligner,
-                name="rubric_aligner",
-                description=(
-                    "Delegate the final grading subtask: include the rubric, the "
-                    "essay, and the synthesized committee reports, and this TA "
-                    "returns the structured JSON grade."
-                ),
-                side_effect=SideEffect.READ_ONLY,
-            ),
+            # The rubric aligner's seat is the grading tool itself, bound to
+            # the case file: every field of its form is case data, so no
+            # model has to copy the rubric, the essay or the reports.
+            GradeCaseTool(llm, case, required_reports),
         ]
     )
 
-    # The manager is a plain SimpleAgent over the worker tools: no special
-    # orchestrator class, no separate roster. The model sees the committee
-    # through the rendered tool catalog and delegates through ordinary
-    # typed tool calls.
-    manager_agent = build_worker_manager(llm, worker_tools, max_steps=10, events=bus)
+    # Application prompt content for the manager: fairlib ships only the
+    # mandatory JSON format rules, and a small local model needs a role and
+    # a worked example of the multi-action turn shape to hit the contract
+    # reliably. Three example turns teach delegation, grading and the final
+    # answer.
+    manager_builder = PromptBuilder()
+    manager_builder.role_definition = RoleDefinition(
+        "You are the lead instructor coordinating an essay grading committee. "
+        "You grade an essay by delegating subtasks to your committee tools "
+        "and then calling the grading tool. The essay is on file: every tool "
+        "receives it automatically, so a subtask says only what to do and "
+        "never contains essay text."
+    )
+    # The first example delegates the checks that need no other report, and
+    # names only seats that are registered: the fact checker exists only
+    # when course materials were given.
+    first_subtasks = {
+        "fact_checker": "Verify the central factual claims of the essay.",
+        "clarity_style_checker": "Review the grammar, clarity and style of the essay.",
+    }
+    first_calls = [
+        {"tool_name": tool.name, "tool_input": first_subtasks[tool.name]}
+        for tool in worker_tools
+        if tool.name in first_subtasks
+    ]
+    first_thought = (
+        "The two checks are independent, so I delegate both in one turn."
+        if len(first_calls) > 1
+        else "The writing review needs no other report, so I delegate it first."
+    )
+    manager_builder.examples.append(
+        Example(
+            "User: Grade the essay on file.\n"
+            "Assistant: "
+            + json.dumps({"thought": first_thought, "actions": first_calls})
+        )
+    )
+    manager_builder.examples.append(
+        Example(
+            "Observation: [content_analyst] <the last report>\n"
+            'Assistant: {"thought": "Every report is in, so I grade.", '
+            '"actions": [{"tool_name": "grade_essay_from_rubric", "tool_input": {}}]}'
+        )
+    )
+    manager_builder.examples.append(
+        Example(
+            'Observation: [grade_essay_from_rubric] {"graded_criteria": [...], '
+            '"overall_feedback": "...", "final_score": 72}\n'
+            'Assistant: {"thought": "The grade is on file, so I finish.", '
+            '"actions": [{"tool_name": "final_answer", "tool_input": '
+            '"Graded: final score 72."}]}'
+        )
+    )
+    manager_builder.examples.append(
+        Example(
+            "Observation: [grade_essay_from_rubric] Error in tool 'grade_essay_from_rubric': No grade "
+            "was produced ...\n"
+            'Assistant: {"thought": "Grading failed once, so I call it once '
+            'more.", "actions": [{"tool_name": "grade_essay_from_rubric", '
+            '"tool_input": {}}]}\n'
+            "Observation: [grade_essay_from_rubric] Error in tool 'grade_essay_from_rubric': No grade "
+            "was produced ...\n"
+            'Assistant: {"thought": "Grading failed twice, so there is no '
+            'grade to report.", "actions": [{"tool_name": "final_answer", '
+            '"tool_input": "No grade was produced: the grading tool failed '
+            'twice."}]}'
+        )
+    )
+
+    # The manager is a plain SimpleAgent over the worker tools and the
+    # grading tool: no special orchestrator class, no separate roster.
+    manager_agent = build_worker_manager(
+        llm, worker_tools, prompt_builder=manager_builder, max_steps=10, events=bus
+    )
 
     # The delegation workflow in the manager's prompt. Independent analyses
     # may be delegated together in one turn; because the graders are
@@ -294,47 +577,49 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
     if knowledge_base:
         workflow_steps.insert(
             0,
-            "Delegate to the `fact_checker` tool to verify any factual claims in the essay.",
+            "Delegate to the `fact_checker` tool to verify the essay's factual claims.",
         )
         workflow_steps.insert(
             2,
             "The fact-checking and writing-quality delegations are "
-            "independent of each other; you may issue both in the same turn "
-            "and they will run concurrently.",
+            "independent of each other; issue both in the same turn and "
+            "they will run concurrently.",
         )
 
     workflow_steps.extend(
         [
-            "After gathering initial reports, delegate to the `content_analyst` tool, providing it with the original essay AND the reports from the other workers for full context.",
-            "Synthesize all reports (style, content, and fact-checking).",
-            "Delegate to the `rubric_aligner` tool with all synthesized information to get the final structured grade.",
-            "Present the structured grade as your final answer.",
+            "After those reports are in, delegate to the `content_analyst` "
+            "tool; it receives the essay and the reports on file.",
+            "Once every report is in, call `grade_essay_from_rubric`.",
+            "STOP CONDITION: once grade_essay_from_rubric returns a grade, "
+            "do NOT delegate again; your next turn is the single final_answer "
+            "action stating that grade's final_score. If "
+            "grade_essay_from_rubric reports an error, call it once more; if "
+            "it fails again, your final_answer says "
+            "that no grade was produced and states no score.",
         ]
     )
 
     workflow_text = "".join(
         f"{i + 1}. {step}\n" for i, step in enumerate(workflow_steps)
     )
-    manager_prompt = f"""
-    Please coordinate your team to grade the following student essay based on the provided rubric.
-
-    Workflow Steps:
-    {workflow_text}
-    **Rubric:**
-    {rubric}
-
-    **Student Essay to be Graded:**
-    {essay_text}
-    """
+    # The manager's prompt carries the workflow, never the essay: the essay
+    # reaches each seat from the case file.
+    manager_prompt = (
+        f"Coordinate your committee to grade the student essay {label} "
+        "on climate change and food security.\n\n"
+        f"Workflow Steps:\n{workflow_text}"
+    )
 
     try:
         final_evaluation = await manager_agent.arun(manager_prompt)
         logger.info(f"Successfully completed agent run for {essay_filename}")
+        print(f"[manager] final answer:\n{final_evaluation}")
         # The grading tool's typed GradeResult, captured off the event bus
         # at its source, is the authoritative structured grade; the
         # manager's final text is presentation on top of it. Fall back to
-        # the raw text only when the aligner never produced a validated
-        # grade.
+        # the raw text only when the grading tool never produced a
+        # validated grade.
         if structured_grades:
             return structured_grades[-1]
         return final_evaluation
@@ -347,6 +632,16 @@ async def grade_single_essay(essay_doc, rubric, knowledge_base):
                 "error": f"A critical error occurred during the agent execution for this essay. Details: {e}"
             }
         )
+
+
+def _score_line(grade_json: str) -> str:
+    """The typed grade's final score, or an error line when there is no grade."""
+    try:
+        grade = FinalGrade.model_validate_json(grade_json)
+    except ValidationError:
+        return "[ERROR] no grade, see the report"
+    out_of = sum(item.max_score for item in grade.graded_criteria)
+    return f"FINAL SCORE: {grade.final_score} / {out_of}"
 
 
 # Main execution block
@@ -375,21 +670,42 @@ async def main(essays_dir, rubric_path, output_dir, materials_dir):
         logger.warning(f"No essays found in '{essays_dir}'. Exiting.")
         return
 
+    # One model plays every seat for the whole batch. The grade must tell an
+    # excellent submission from an average one, and a 7B grader scores them
+    # alike, so the default is a 14B instruct model; override with
+    # FAIR_LLM_DEMO_MODEL to experiment.
+    llm = HuggingFaceAdapter(
+        os.environ.get("FAIR_LLM_DEMO_MODEL", "Qwen/Qwen2.5-14B-Instruct"),
+        max_new_tokens=2048,
+    )
+
     # Process each essay, wrapping the main call in error handling
     # This ensures that one failed essay does not stop the entire batch.
-    for essay in student_essays:
+    # The committee grades anonymous labels; the mapping back to file names
+    # stays with the demo and is printed here and in the summary.
+    # Each essay is labelled by its position in the batch, so two files that
+    # share a name get their own labels.
+    labels = [f"Essay {i}" for i in range(1, len(student_essays) + 1)]
+    print("\nThe committee sees anonymous labels only:")
+    for label, essay in zip(labels, student_essays):
+        print(f"  {label} = {essay.metadata.get('source', 'unknown')}")
+
+    summary: List[str] = []
+    for i, (label, essay) in enumerate(zip(labels, student_essays)):
+        name = Path(essay.metadata.get("source", f"essay {i}")).name
         try:
-            grade_json = await grade_single_essay(essay, rubric_content, knowledge_base)
+            grade_json = await grade_single_essay(
+                llm, essay, rubric_content, knowledge_base, label
+            )
             original_filename = Path(essay.metadata["source"]).stem
             report_filepath = output_path / f"{original_filename}_grade_report.txt"
-            report_content = format_report(
-                grade_json, Path(essay.metadata["source"]).name
-            )
+            report_content = format_report(grade_json, name)
             report_filepath.write_text(report_content, encoding="utf-8")
             logger.info(f"Grade report saved to: {report_filepath}")
+            summary.append(f"{label} ({name}): {_score_line(grade_json)}")
         except Exception as e:
             logger.error(
-                f"A critical error occurred while processing {essay.metadata.get('source', 'an essay')}. Skipping. Error: {e}",
+                f"A critical error occurred while processing {name}. Skipping. Error: {e}",
                 exc_info=True,
             )
             # Optionally, write an error report for the failed essay
@@ -400,7 +716,11 @@ async def main(essays_dir, rubric_path, output_dir, materials_dir):
             error_report_path.write_text(
                 f"Failed to grade this essay due to a critical error:\n{e}"
             )
+            summary.append(f"{label} ({name}): [ERROR] {e}")
 
+    print("\n=== Grades ===")
+    for line in summary:
+        print(f"  {line}")
     logger.info("\n--- Essay Grading Batch Complete ---")
 
 

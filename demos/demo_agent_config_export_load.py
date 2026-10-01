@@ -50,6 +50,7 @@ from fairlib import (
     RoleDefinition,
     SafeCalculatorTool,
     SimpleAgent,
+    ToolCallPostEvent,
     ToolExecutor,
     ToolRegistry,
     WeatherTool,
@@ -68,7 +69,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-MODEL_NAME = "dolphin3-qwen25-3b"
+MODEL_NAME = "qwen25-7b"
 # Every file the demo writes lands in a scratch directory removed at exit.
 SCRATCH_DIR = Path(tempfile.mkdtemp(prefix="fair_agent_config_demo_"))
 atexit.register(shutil.rmtree, SCRATCH_DIR, ignore_errors=True)
@@ -130,10 +131,6 @@ def build_calculator_agent(llm, prompt_builder: PromptBuilder) -> SimpleAgent:
     The builder is injected at planner construction - the recommended shape
     for applications.
     """
-    print("\n" + "=" * 60)
-    print("BUILDING AGENT")
-    print("=" * 60)
-
     tool_registry = ToolRegistry()
     tool_registry.register_tool(SafeCalculatorTool())
 
@@ -185,6 +182,9 @@ async def main():
 
     llm = HuggingFaceAdapter(MODEL_NAME)
 
+    print("\n" + "=" * 60)
+    print("BUILDING AGENT")
+    print("=" * 60)
     original_agent = build_calculator_agent(llm, build_calculator_prompts())
     await test_agent(original_agent, "Original Agent")
 
@@ -200,7 +200,7 @@ async def main():
     print(f"YAML copy: {yaml_path}")
     print("\nConfiguration contents:")
     content = config["prompts"]["content"]
-    print(f"- Role: {content['role_definition'][:50]}...")
+    print(f"- Role: {content['role_definition']}")
     print(f"- Tools: {config['agent']['tools']}")
     print(f"- Examples: {len(content['examples'])}")
     print(f"- Max steps: {config['agent']['max_steps']}")
@@ -278,7 +278,7 @@ async def demonstrate_rendered_tamper_proof(agent: SimpleAgent, config_path: Pat
     load_prompts_into_agent(str(tamper_path), agent)
     role = agent.planner.prompt_builder.role_definition
     catalog = agent.planner.render_system_prompt()
-    print(f"Role still from content: {role.text[:40]}...")
+    print(f"Role still from content: {role.text}")
     print(
         f"Tampered rendered text not in live catalog: {'IGNORE ALL RULES' not in catalog}"
     )
@@ -331,7 +331,45 @@ async def demonstrate_load_prompts_into_agent(agent: SimpleAgent, config_path: P
     agent.planner.prompt_builder.role_definition = RoleDefinition("Temporary role.")
     load_prompts_into_agent(str(config_path), agent)
     role = agent.planner.prompt_builder.role_definition
-    print(f"Reloaded role: {role.text[:50] if role else '(none)'}...")
+    print(f"Reloaded role: {role.text if role else '(none)'}")
+
+
+class DelegationTicker:
+    """Prints a manager's delegations and its workers' tool calls as they return.
+
+    It keeps the manager's delegation events so the demo can say, after the
+    run, whether the answer really came through a worker.
+    """
+
+    def __init__(self) -> None:
+        self.delegations: list = []
+
+    def on_delegation(self, event: ToolCallPostEvent) -> None:
+        self.delegations.append(event)
+        status = "ok" if event.succeeded else "FAILED"
+        print(
+            f"  [manager -> {event.tool_name}] {event.tool_input!r} -> {status}:\n"
+            f"{event.observation}"
+        )
+
+    def worker_handler(self, worker_name: str):
+        """A subscriber that prints one worker's own tool calls."""
+
+        def on_worker_tool(event: ToolCallPostEvent) -> None:
+            status = "ok" if event.succeeded else "FAILED"
+            print(
+                f"    [{worker_name} -> {event.tool_name}] {event.tool_input!r} "
+                f"-> {status}:\n{event.observation}"
+            )
+
+        return on_worker_tool
+
+    def report(self) -> None:
+        succeeded = [event for event in self.delegations if event.succeeded]
+        print(
+            f"Delegations made: {len(self.delegations)}, succeeded: {len(succeeded)}"
+            + ("" if succeeded else " - the answer above did not come from a worker")
+        )
 
 
 async def demonstrate_multi_agent_round_trip(llm):
@@ -376,14 +414,26 @@ async def demonstrate_multi_agent_round_trip(llm):
     print(f"Multi-agent round trip: {team_path}")
     print(f"Workers rebuilt from the file: {sorted(tools)}")
 
+    # Every delegation the loaded manager makes, and every tool call its
+    # loaded workers make, is printed with its input and outcome, so a
+    # failed delegation can never hide behind an answer the manager wrote
+    # itself.
+    ticker = DelegationTicker()
+    reloaded.events.subscribe(ToolCallPostEvent, ticker.on_delegation)
+    for name, tool in tools.items():
+        tool.worker.events.subscribe(ToolCallPostEvent, ticker.worker_handler(name))
+
     from fairlib.core.errors import PlannerParseError
 
     reloaded.memory.clear()
+    query = "What is 12 times 7?"
+    print(f"\nDelegation query: {query}")
     try:
-        response = await reloaded.arun("What is 12 times 7?")
+        response = await reloaded.arun(query)
         print(f"Delegation query response: {response}")
     except PlannerParseError as e:
         print(f"Delegation query (typed parse failure): {e}")
+    ticker.report()
 
 
 async def demonstrate_live_prompt_swap(agent: SimpleAgent):
@@ -405,19 +455,21 @@ async def demonstrate_live_prompt_swap(agent: SimpleAgent):
 
     config = json.loads(swap_path.read_text(encoding="utf-8"))
     config["prompts"]["content"]["role_definition"] = (
-        "You are a terse calculator assistant. Use the calculator tool for "
-        "every computation and answer with the bare number only - no "
-        "sentences, no punctuation, just the numeric result."
+        "You are a calculator assistant who writes numbers out in words. Use "
+        "the calculator tool for every computation, then give the final "
+        "answer as the result spelled out in English words (for example, 42 "
+        "is written 'forty-two'), never as digits."
     )
     swap_path.write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print("Edited role_definition in the file (terse persona).")
+    print("Edited role_definition in the file (numbers-in-words persona).")
+    print("Before the swap the answers were digits; watch them turn into words.")
 
     load_prompts_into_agent(str(swap_path), agent)
     print("Hot-reloaded prompts via load_prompts_into_agent.")
 
-    await test_agent(agent, "After live prompt swap (terse persona)")
+    await test_agent(agent, "After live prompt swap (numbers-in-words persona)")
 
 
 async def demonstrate_live_registry_swap(agent: SimpleAgent):
@@ -454,8 +506,8 @@ async def demonstrate_live_registry_swap(agent: SimpleAgent):
     print(f"'weather' in catalog after swap:  {'weather' in catalog_after}")
 
     agent.memory.clear()
-    response = await agent.arun("What is the weather in Denver?")
     print("\nQuery: What is the weather in Denver?")
+    response = await agent.arun("What is the weather in Denver?")
     print(f"Response: {response}")
 
 

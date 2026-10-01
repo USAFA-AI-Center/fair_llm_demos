@@ -52,7 +52,7 @@ import time
 from typing import List
 
 from fairlib import (
-    OBSERVATION_PREFIX,
+    OBSERVATION_MARKER_KEY,
     AbstractChatModel,
     AgentEventBus,
     HuggingFaceAdapter,
@@ -64,6 +64,7 @@ from fairlib import (
     WorkerAgentTool,
     WorkingMemory,
     build_worker_manager,
+    has_marker,
 )
 from fairlib.core.events import (
     ToolBatchScheduledEvent,
@@ -245,7 +246,7 @@ async def main() -> None:
 
     print("\nManager memory (one observation per delegation, in call order):")
     for message in manager.memory.get_history():
-        if message.content.startswith(OBSERVATION_PREFIX):
+        if has_marker(message, OBSERVATION_MARKER_KEY):
             print(f"  {message.content[:160]}")
 
 

@@ -1,5 +1,5 @@
 """
-This demo builds a miniature application on the v0.3.4 event bus: a live
+This demo builds a miniature application on the agent event bus: a live
 console monitor for a running agent, in the style of a flight recorder.
 
 The application is a calculator agent you chat with, exactly like
@@ -8,6 +8,13 @@ is doing WHILE it works. A ticker line appears for every step the agent
 takes, every tool call (with timing), every parse stumble, and every memory
 compaction. After any turn you can type 'trace' to replay the whole turn as
 a structured timeline.
+
+Every run opens with a short scripted exchange (three questions and a
+'trace' command) so the ticker and the flight record are on screen even
+when nobody is typing; after that the prompt is yours. Memory compacts
+once the history passes eight messages, usually between the steps of a
+turn, and each question is still the one answered: the request of the turn
+in progress is never summarized away.
 
 The point for an implementer: everything the monitor knows arrives through
 bus subscriptions on typed event objects. It never reads framework
@@ -45,6 +52,14 @@ from fairlib import (
     ToolCallPreEvent,
     ToolExecutor,
     ToolRegistry,
+)
+
+# The opening every run plays before handing the prompt to you.
+SCRIPTED_OPENING = (
+    "What is 12.5 * 8?",
+    "Take 144 divided by 12, then multiply that result by 7.",
+    "What is 7 * 13 - 4?",
+    "trace",
 )
 
 
@@ -145,7 +160,37 @@ class FlightRecorder:
             return
         print(f"\nFlight record of the last turn ({len(self.turn_events)} events):")
         for i, event in enumerate(self.turn_events, start=1):
-            print(f"  {i:2d}. {type(event).__name__:24s} {event}")
+            print(f"  {i:2d}. {type(event).__name__:24s} {self._describe(event)}")
+
+    @staticmethod
+    def _describe(event) -> str:
+        """The fields of one stored event worth reading in a timeline."""
+        if isinstance(event, AgentStepEvent):
+            return f"step={event.step} history_length={event.history_length}"
+        if isinstance(event, ToolCallPreEvent):
+            return f"step={event.step} {event.tool_name} input={event.tool_input!r}"
+        if isinstance(event, ToolCallPostEvent):
+            return (
+                f"step={event.step} {event.tool_name} succeeded={event.succeeded} "
+                f"observation={event.observation!r}"
+            )
+        if isinstance(event, MemorySummarizedEvent):
+            summary = event.summary.content.replace("\n", " ")
+            return (
+                f"reason={event.reason.value} dropped={len(event.dropped)} "
+                f"kept={len(event.kept)} summary={summary!r}"
+            )
+        if isinstance(event, PlannerParseErrorEvent):
+            return (
+                f"step={event.step} attempt={event.attempt} "
+                f"will_retry={event.will_retry} raw_output={event.raw_output!r}"
+            )
+        if isinstance(event, LoopGuardTrippedEvent):
+            return (
+                f"step={event.step} guard={event.guard_type.value} "
+                f"count={event.count} threshold={event.threshold}"
+            )
+        return repr(event)
 
 
 async def main() -> None:
@@ -170,6 +215,8 @@ async def main() -> None:
     # A small max_history_length means a normal conversation will trigger
     # compaction within a few turns, so you can watch the
     # MemorySummarizedEvent arrive on the same ticker as the loop events.
+    # Compaction may fire between the steps of a turn; the question being
+    # answered is kept verbatim, so the agent still answers the right one.
     memory = SummarizingMemory(
         llm=llm,
         max_history_length=8,
@@ -186,36 +233,23 @@ async def main() -> None:
         events=bus,
     )
 
-    print("Agent ready. Ask it math questions and watch the ticker.")
-    print("Commands:  trace  - replay the last turn as a timeline")
-    print("           mute   - detach the ticker (agent runs silently)")
-    print("           unmute - reattach the ticker")
-    print("           exit   - quit\n")
-
-    while True:
-        try:
-            user_input = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye!")
-            break
-
-        if not user_input:
-            continue
+    async def handle(user_input: str) -> bool:
+        """Run one line of input; return False when the session should end."""
         command = user_input.lower()
         if command in ("exit", "quit"):
             print("Goodbye!")
-            break
+            return False
         if command == "trace":
             recorder.render()
-            continue
+            return True
         if command == "mute":
             monitor.detach()
             print("(ticker muted - the agent still emits, nobody is listening)")
-            continue
+            return True
         if command == "unmute":
             monitor.attach()
             print("(ticker reattached)")
-            continue
+            return True
 
         recorder.new_turn()
         try:
@@ -225,6 +259,31 @@ async def main() -> None:
             # Framework errors are typed; a real application would branch
             # on the specific FairlibError subclass here.
             print(f"Agent could not finish: {type(exc).__name__}: {exc}\n")
+        return True
+
+    print("Agent ready. Ask it math questions and watch the ticker.")
+    print("Commands:  trace  - replay the last turn as a timeline")
+    print("           mute   - detach the ticker (agent runs silently)")
+    print("           unmute - reattach the ticker")
+    print("           exit   - quit\n")
+
+    # The scripted opening: three turns the ticker narrates live, then the
+    # flight record of the third turn.
+    for scripted in SCRIPTED_OPENING:
+        print(f"You (scripted): {scripted}")
+        await handle(scripted)
+
+    print("\nYour turn.")
+    while True:
+        try:
+            user_input = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye!")
+            break
+        if not user_input:
+            continue
+        if not await handle(user_input):
+            break
 
 
 if __name__ == "__main__":

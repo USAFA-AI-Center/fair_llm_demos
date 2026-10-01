@@ -1,18 +1,17 @@
 # demo_faiss_rag_from_readme.py
 """
-================================================================================
-        FAISS RAG Demonstration (Async, Always Re-Rank, Full ReACT Loop)
-================================================================================
+FAISS RAG with cross-encoder re-ranking and the full ReAct loop.
 
-This mirrors demo_rag_from_documents.py, but:
- - Uses DocumentProcessor (split_text_semantic) for chunking
- - Stores/retrieves with FaissVectorStore (persistent)
- - Always re-ranks via CrossEncoder
- - Runs the full ReACT agent loop
+This mirrors demo_rag_from_documents.py, but chunks README.md with
+DocumentProcessor, stores and retrieves the chunks with FaissVectorStore,
+re-ranks every retrieval with a CrossEncoder, and runs the full ReAct agent
+loop over the re-ranked search tool. Each knowledge-base search the agent
+makes is printed with its query and the [S#] markers it returned.
 """
 
 import asyncio
 import logging
+import re
 import shutil
 from pathlib import Path
 
@@ -23,9 +22,11 @@ from fairlib import (
     LongTermMemory,
     RAGQueryTool,
     ReActPlanner,
+    RoleDefinition,
     SentenceTransformerEmbedder,
     SimpleAgent,
     SimpleRetriever,
+    ToolCallPostEvent,
     ToolExecutor,
     ToolRegistry,
     WorkingMemory,
@@ -39,6 +40,20 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("demo_faiss_rag_from_documents")
+
+
+def on_tool_call(event: ToolCallPostEvent) -> None:
+    """Print each knowledge-base search: the query and the markers it returned.
+
+    A retrieved passage starts with its marker alone on a line, so only those
+    lines count; the cite-only instruction's example marker does not.
+    """
+    status = "ok" if event.succeeded else "failed"
+    numbers = sorted(
+        {int(n) for n in re.findall(r"^\[S(\d+)\]$", event.observation or "", re.M)}
+    )
+    markers = " ".join(f"[S{n}]" for n in numbers)
+    print(f"  [{event.tool_name}] {event.tool_input!r} -> {status}: {markers}")
 
 
 async def main():
@@ -79,7 +94,7 @@ async def main():
     rerank_k = min(top_k * pool_multiplier, max_initial_docs)
 
     try:
-        llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+        llm = HuggingFaceAdapter("qwen25-7b")
         embedder = SentenceTransformerEmbedder(model_name=embed_model)
     except Exception as e:
         logger.critical(f"Failed to initialize LLM or embedder: {e}", exc_info=True)
@@ -111,8 +126,8 @@ async def main():
 
     doc_proc = DocumentProcessor({"files_directory": str(readme_path.parent)})
 
-    # Process a single file -> DP handles extraction + split_text_semantic internally
-    # Important note: document processor now returns a Document object, instead of chunks and metadata
+    # process_file extracts and chunks the file; each returned Document is one
+    # chunk carrying its source label.
     documents = doc_proc.process_file(str(readme_path))
     if not documents:
         logger.error("DocumentProcessor returned no documents from README.md.")
@@ -125,7 +140,9 @@ async def main():
     logger.info("Document successfully ingested into FAISS-backed Long-Term Memory.")
 
     # Build the ReACT Agent
-    rag_tool = RAGQueryTool(retriever)
+    # top_k passages per search: a README heading and its bullet list often
+    # land in neighbouring chunks, so one search needs room for both.
+    rag_tool = RAGQueryTool(retriever, top_k=top_k)
     tool_registry = ToolRegistry()
     tool_registry.register_tool(rag_tool)
 
@@ -133,12 +150,22 @@ async def main():
     executor = ToolExecutor(tool_registry)
     working_memory = WorkingMemory()
 
-    rag_agent = SimpleAgent(llm, planner, executor, working_memory)
-    rag_agent.role_description = (
+    # The role reaches the model through the planner's prompt builder, the
+    # seam every planner renders its system prompt from.
+    planner.prompt_builder.role_definition = RoleDefinition(
         "You are a helpful AI assistant and an expert on the FAIR-LLM framework. "
         "You MUST use the 'search_knowledge_base' tool to answer questions about "
-        "the framework, its principles, or its architecture."
+        "the framework, its principles, or its architecture. Your first "
+        "action for every new question is a search_knowledge_base call made "
+        "for that question, even when earlier passages look related; never "
+        "answer a question before that search. "
+        "Answer only from what the returned passages say, never from memory. "
+        "A passage can stop partway through: when one announces a list or a "
+        "definition that none of the passages contains, search again using "
+        "the words it introduces before you answer."
     )
+    rag_agent = SimpleAgent(llm, planner, executor, working_memory)
+    rag_agent.events.subscribe(ToolCallPostEvent, on_tool_call)
     logger.info("RAG Agent created with re-ranked retriever.")
 
     questions = [

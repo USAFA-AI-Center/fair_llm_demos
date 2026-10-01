@@ -16,12 +16,14 @@ declares one ToolConformanceCase for it that sets every field of the case:
 the sample input and the fragment its observation must contain, a failing
 input the tool must refuse on the typed channel, a watched directory the
 READ_ONLY tool must leave untouched, a reset hook run before every
-behavioral call, a wall-clock bound per call, and a label for the report
-header. It prints the report, then runs the same suite over a broken twin
-that returns an error string instead of raising ToolInvocationError, so
-the failure a report shows is a real one. Finally the conforming tool is
-registered with a SimpleAgent on a local model and asked a question that
-needs it, and the tool's own call log shows the agent used it.
+behavioral call, a wall-clock bound per call, a label for the report
+header, and the security manager the tool's dispatch meets (the same
+BasicSecurityManager the agent's executor holds below). It prints the
+report, then runs the same suite over a broken twin that returns an error
+string instead of raising ToolInvocationError, so the failure a report
+shows is a real one. Finally the conforming tool is registered with a
+SimpleAgent on a local model and asked a question that needs it, and the
+tool's own call log shows the agent used it.
 
 Set FAIR_LLM_DEMO_MODEL to pick the local model (a settings.yml alias or a
 Hugging Face model id).
@@ -36,6 +38,7 @@ from pydantic import BaseModel, Field
 
 from fairlib import (
     AbstractTool,
+    BasicSecurityManager,
     HuggingFaceAdapter,
     RoleDefinition,
     SideEffect,
@@ -51,7 +54,7 @@ from fairlib import (
     check_tool_conformance,
 )
 
-MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
 
 _FACTORS_TO_METERS = {
     "m": 1.0,
@@ -66,6 +69,11 @@ _FACTORS_TO_METERS = {
 # would put its sample's target back; after the agent run it shows the
 # conversions the agent actually asked for.
 _CONVERSION_LOG: list = []
+
+# The security manager the tool's dispatch meets, in the suite and in the
+# agent alike. The tool declares no isolation level, so it runs in-process
+# with this manager bound, and the executor screens each input through it.
+SECURITY_MANAGER = BasicSecurityManager()
 
 
 def reset_conversion_log() -> None:
@@ -122,8 +130,9 @@ def run_suite(tool: AbstractTool, label: str) -> None:
     # Every field of ToolConformanceCase, set: the sample and the fragment
     # its observation must contain, a failing input the tool must refuse on
     # the typed channel, a directory this READ_ONLY tool must leave
-    # untouched, the reset hook, a wall-clock bound on each call, and the
-    # label the report header carries.
+    # untouched, the reset hook, a wall-clock bound on each call, the
+    # label the report header carries, and the security manager the
+    # tool's dispatch meets.
     with tempfile.TemporaryDirectory(prefix="conformance_watched_") as watched:
         case = ToolConformanceCase(
             tool,
@@ -134,6 +143,7 @@ def run_suite(tool: AbstractTool, label: str) -> None:
             reset=reset_conversion_log,
             timeout_seconds=5.0,
             label=label,
+            security_manager=SECURITY_MANAGER,
         )
         report = check_tool_conformance(case)
     print(report.render())
@@ -158,7 +168,7 @@ async def ask_the_agent() -> None:
     agent = SimpleAgent(
         llm=llm,
         planner=planner,
-        tool_executor=ToolExecutor(registry),
+        tool_executor=ToolExecutor(registry, security_manager=SECURITY_MANAGER),
         memory=WorkingMemory(),
         max_steps=6,
     )

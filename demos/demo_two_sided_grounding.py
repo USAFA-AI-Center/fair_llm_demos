@@ -9,7 +9,7 @@ the tool actually retrieved and reports a fabrication rate.
 The whole path runs through a SimpleAgent so the retrieval, the citation
 instruction, and the answer are the agent's own, not a hand-built prompt.
 
-Requires a local model; defaults to HuggingFaceAdapter("dolphin3-qwen25-3b").
+Requires a local model; defaults to HuggingFaceAdapter("qwen25-7b").
 Set FAIR_LLM_DEMO_MODEL to override. The first run may download weights.
 
 Run:
@@ -37,7 +37,7 @@ from fairlib import (
     WorkingMemory,
 )
 
-MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
 
 KNOWLEDGE_BASE = [
     Document(
@@ -121,7 +121,7 @@ async def main() -> None:
         return
     print("\nSources the tool retrieved:")
     for source in context.sources:
-        print(f"  [{source.marker}] {source.content[:70]}...")
+        print(f"  {source.marker} {source.content}")
     _print_report("Citation verification", CitationVerifier().verify(answer, context))
 
 

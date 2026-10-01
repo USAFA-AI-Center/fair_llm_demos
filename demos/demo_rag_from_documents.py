@@ -24,10 +24,12 @@ Set FAIR_LLM_DEMO_MODEL to override the default model.
 import asyncio
 import logging
 import os
+import re
 from pathlib import Path
 
 try:
     import chromadb
+    from chromadb.config import Settings as ChromaSettings
 
     CHROMADB_LOADED = True
 except ImportError:
@@ -43,9 +45,11 @@ from fairlib import (
     LongTermMemory,
     RAGQueryTool,
     ReActPlanner,
+    RoleDefinition,
     SentenceTransformerEmbedder,
     SimpleAgent,
     SimpleRetriever,
+    ToolCallPostEvent,
     ToolExecutor,
     ToolRegistry,
     WorkingMemory,
@@ -57,7 +61,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = os.getenv("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
+# The 14B is the default: the 7B tends to answer from the README title and
+# name three of the four principles even with the principles passage in its
+# context.
+MODEL_NAME = os.getenv("FAIR_LLM_DEMO_MODEL", "qwen25-14b")
+
+# Passages returned per search. README sections are long, and a section
+# heading often lands in a different chunk than the list under it; plain
+# similarity search (no re-ranker here) can rank that list chunk below the
+# top five, so eight passages leave room for both.
+TOP_K = 8
+
+
+def on_tool_call(event: ToolCallPostEvent) -> None:
+    """Print each knowledge-base search: the query and the markers it returned.
+
+    A retrieved passage starts with its marker alone on a line, so only those
+    lines count; the cite-only instruction's example marker does not.
+    """
+    status = "ok" if event.succeeded else "failed"
+    numbers = sorted(
+        {int(n) for n in re.findall(r"^\[S(\d+)\]$", event.observation or "", re.M)}
+    )
+    markers = " ".join(f"[S{n}]" for n in numbers)
+    print(f"  [{event.tool_name}] {event.tool_input!r} -> {status}: {markers}")
 
 
 def demo_chunking_filters_incremental() -> None:
@@ -118,7 +145,8 @@ async def demo_chroma_rag_agent() -> None:
         llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
         embedder = SentenceTransformerEmbedder()
         vector_store = ChromaDBVectorStore(
-            client=chromadb.Client(),
+            # Telemetry off: the chromadb client otherwise logs posthog errors.
+            client=chromadb.Client(ChromaSettings(anonymized_telemetry=False)),
             collection_name="readme_rag",
             embedder=embedder,
         )
@@ -134,18 +162,18 @@ async def demo_chroma_rag_agent() -> None:
         return
 
     doc_proc = DocumentProcessor({"files_directory": str(readme_path.parent)})
-    document = doc_proc.process_file(str(readme_path))
-    if not document:
+    # process_file extracts and chunks the whole file: each returned Document
+    # is one chunk carrying its source label, so every one of them is ingested.
+    documents = doc_proc.process_file(str(readme_path))
+    if not documents:
         logger.error("DocumentProcessor returned no documents from README.md.")
         return
 
-    # Use DocumentProcessor chunking instead of a local splitter helper.
-    chunks = doc_proc.split_text(document[0].page_content, strategy="semantic")
-    logger.info("Document split into %d semantic chunks.", len(chunks))
-    long_term_memory.add_document(chunks)
+    print(f"README.md split into {len(documents)} chunks; ingesting all of them.")
+    long_term_memory.vector_store.add_documents(documents)
     logger.info("Document successfully ingested into long-term memory.")
 
-    rag_tool = RAGQueryTool(retriever)
+    rag_tool = RAGQueryTool(retriever, top_k=TOP_K)
     tool_registry = ToolRegistry()
     tool_registry.register_tool(rag_tool)
 
@@ -153,12 +181,25 @@ async def demo_chroma_rag_agent() -> None:
     executor = ToolExecutor(tool_registry)
     working_memory = WorkingMemory()
 
-    rag_agent = SimpleAgent(llm, planner, executor, working_memory)
-    rag_agent.role_description = (
+    # The role reaches the model through the planner's prompt builder, the
+    # seam every planner renders its system prompt from.
+    planner.prompt_builder.role_definition = RoleDefinition(
         "You are a helpful AI assistant and an expert on the FAIR-LLM framework. "
         "You MUST use the 'search_knowledge_base' tool to answer questions about "
-        "the framework, its principles, or its architecture."
+        "the framework, its principles, or its architecture. Your first "
+        "action for every new question is a search_knowledge_base call made "
+        "for that question, even when earlier passages look related; never "
+        "answer a question before that search. "
+        "Answer only from what the returned passages say, never from memory. "
+        "A passage can stop partway through: when one announces a list or a "
+        "definition that none of the passages contains, search again using "
+        "the words it introduces before you answer."
     )
+    # Each question is its own lookup, so every run starts from a clean
+    # history: with the previous question's passages still in memory the
+    # model answers the next question from them instead of searching.
+    rag_agent = SimpleAgent(llm, planner, executor, working_memory, stateless=True)
+    rag_agent.events.subscribe(ToolCallPostEvent, on_tool_call)
     logger.info("RAG agent created.")
 
     questions = [

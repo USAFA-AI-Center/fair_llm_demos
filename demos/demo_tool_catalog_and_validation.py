@@ -55,7 +55,7 @@ from fairlib.core.interfaces.tools import (
 )
 from fairlib.core.prompts import PromptBuilder
 
-MODEL_NAME = "dolphin3-qwen25-3b"
+MODEL_NAME = "qwen25-7b"
 
 
 # --- A deliberately non-trivial schema: nested model + enum + list of literals ---
@@ -143,11 +143,10 @@ async def show_validation_rejection(registry: ToolRegistry) -> None:
 
 
 def print_history(agent: SimpleAgent) -> None:
-    """Surface the loop transcript so any in-loop self-correction is visible."""
+    """Surface the loop transcript, whole, so any in-loop self-correction is visible."""
     print("\n=== Loop transcript (Feature 3 fires here if the model fumbles first) ===")
     for message in agent.memory.history:
-        preview = message.content.replace("\n", " | ")[:160]
-        print(f"  [{message.role}] {preview}")
+        print(f"  [{message.role}]\n{message.content}")
 
 
 async def main() -> None:

@@ -12,7 +12,7 @@ that does not parse as the schema is rejected with the validation error as
 feedback, and only the wrap-up is rewritten; after max_retries the framework
 raises a typed ValidatorRejectedError instead of returning a broken reply.
 
-Requires a local model; defaults to HuggingFaceAdapter("dolphin3-qwen25-3b").
+Requires a local model; defaults to HuggingFaceAdapter("qwen25-7b").
 Set FAIR_LLM_DEMO_MODEL to override.
 """
 
@@ -36,7 +36,7 @@ from fairlib import (
     WorkingMemory,
 )
 
-MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
 
 
 # --- Step 1: the schema is the form the agent has to fill in -----------------

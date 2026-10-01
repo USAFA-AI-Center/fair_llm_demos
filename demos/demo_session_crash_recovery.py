@@ -12,7 +12,9 @@ You will register a live calculator agent under a session id, run a turn, then
 persist the session while it is still marked running. recover_interrupted_sessions
 simulates a crash by marking stale runs. A fresh agent is built and recover
 loads message history from disk. The demo continues the conversation on the
-recovered agent.
+recovered agent with a question whose answer depends on the recovered turn,
+and every calculator call is printed from the event bus, so you can see the
+recovered agent compute from the history it loaded.
 
 Run: PYTHONPATH=. python demos/demo_session_crash_recovery.py
 Requires a GPU. Set FAIR_LLM_DEMO_MODEL to override the default model.
@@ -31,12 +33,18 @@ from fairlib import (
     SessionStatus,
     SimpleAgent,
     SimpleReActPlanner,
+    ToolCallPostEvent,
     ToolExecutor,
     ToolRegistry,
     WorkingMemory,
 )
 
 MODEL_NAME = os.getenv("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
+
+
+def show_tool_call(event: ToolCallPostEvent) -> None:
+    """Print each calculator call, so the arithmetic behind an answer is visible."""
+    print(f"  [{event.tool_name}] {event.tool_input!r} -> {event.observation}")
 
 
 def build_calculator_agent() -> SimpleAgent:
@@ -49,13 +57,15 @@ def build_calculator_agent() -> SimpleAgent:
     planner.prompt_builder.role_definition = RoleDefinition(
         "You are a helpful calculator assistant. Use safe_calculator for math."
     )
-    return SimpleAgent(
+    agent = SimpleAgent(
         llm=llm,
         planner=planner,
         tool_executor=executor,
         memory=WorkingMemory(),
         max_steps=6,
     )
+    agent.events.subscribe(ToolCallPostEvent, show_tool_call)
+    return agent
 
 
 async def main() -> None:
@@ -89,8 +99,11 @@ async def main() -> None:
         print("Recovered message count:", len(recovered_agent.memory.history))
 
         print("\n--- Continued turn on recovered agent ---")
-        recovered_result = await recovered_agent.arun("Continue with 9 + 1.")
+        question = "Add 9 + 1 to the previous result."
+        print("You:", question)
+        recovered_result = await recovered_agent.arun(question)
         print("Recovered result:", recovered_result)
+        print("Expected: 52 (the recovered 42, plus 9 + 1)")
 
         registry.unregister("classroom-demo")
         print("Final stored status:", store.load("classroom-demo").status.value)

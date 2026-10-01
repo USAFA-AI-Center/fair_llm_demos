@@ -1,6 +1,4 @@
-# single_agent_calculator_demo.py
-import asyncio
-
+# demo_single_agent_calculator.py
 """
 This script serves as a foundational tutorial for the FAIR-LLM framework.
 
@@ -9,9 +7,14 @@ It demonstrates how to assemble and run a single, autonomous agent. This is the
 interactions in the simplest possible configuration.
 
 We will build an agent that has one tool: a calculator. We will then interact
-with it in a simple loop. For a more advanced example demonstrating multi-agent
-collaboration, see `demo_advanced_calculator_calculus.py`.
+with it in a simple loop. Every calculator call the agent makes is printed as it
+happens (tool name, the input the agent chose, and the result), so you can see
+the agent reach for its tool instead of answering from memory. For an agent that
+combines the calculator with a symbolic calculus tool, see
+demo_advanced_calculator_calculus.py.
 """
+
+import asyncio
 
 # --- Step 1: Import the necessary framework components ---
 # We import everything needed to build a single agent from the ground up.
@@ -21,10 +24,19 @@ from fairlib import (
     SafeCalculatorTool,
     SimpleAgent,
     SimpleReActPlanner,
+    ToolCallPostEvent,
     ToolExecutor,
     ToolRegistry,
     WorkingMemory,
 )
+
+
+def on_tool_call(event: ToolCallPostEvent) -> None:
+    """Print one tool call: the tool, the input the agent chose, and its result."""
+    status = "ok" if event.succeeded else "failed"
+    print(
+        f"  [tool] {event.tool_name}({event.tool_input!r}) -> {status}: {event.observation}"
+    )
 
 
 async def main():
@@ -37,7 +49,7 @@ async def main():
     # An agent is composed of several key parts, which we instantiate here.
 
     # a) The "Brain": The Language Model
-    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    llm = HuggingFaceAdapter("qwen25-7b")
 
     # b) The "Toolbelt": The Tool Registry and Tools
     # The registry holds all the tools the agent can use.
@@ -83,6 +95,9 @@ async def main():
         memory=memory,
         max_steps=10,  # We give it a limit to prevent it from running forever.
     )
+    # Observability: the agent publishes a typed event after every tool call.
+    # Subscribing to it shows each calculator call live.
+    agent.events.subscribe(ToolCallPostEvent, on_tool_call)
     print("Agent successfully created. You can now chat with the agent.")
     print(
         "Try asking it a math problem, like 'What is 45 * 11?' or 'What is the result of 1024 divided by 256?'. Type 'exit' to quit."
@@ -100,7 +115,6 @@ async def main():
             # This is the main call. The agent takes the input and runs its
             # entire Reason-Act loop to come up with a response.
             agent_response = await agent.arun(user_input)
-            print(f"LLM Raw Output:\n{agent_response}")
             print(f"Agent: {agent_response}")
 
         except (EOFError, KeyboardInterrupt):

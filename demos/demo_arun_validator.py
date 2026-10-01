@@ -1,5 +1,5 @@
 """
-This demo builds a miniature application on the v0.3.3 validator surface: a
+This demo builds a miniature application on the arun validator surface: a
 math help desk whose answers are guaranteed to arrive in a fixed format.
 
 The problem this solves for an implementer: an agent can do the work

@@ -69,14 +69,14 @@ def build_recording_adapter(vision: bool) -> ChatModelConformanceCase:
     """One live adapter, hooked to record the payload each call builds."""
     adapter = OllamaAdapter(model_name=MODEL_NAME, vision=vision)
     recorded = {}
-    original_prepare = adapter._prepare_payload
+    original_body = adapter._payload_body
 
-    def recording_prepare(messages, stream, **kwargs):
-        payload = original_prepare(messages, stream, **kwargs)
+    def recording_body(messages, stream, options):
+        payload = original_body(messages, stream, options)
         recorded["json"] = payload
         return payload
 
-    adapter._prepare_payload = recording_prepare
+    adapter._payload_body = recording_body
 
     return ChatModelConformanceCase(
         model=adapter,
@@ -106,7 +106,7 @@ def main() -> None:
     print("We hand the model a small image as raw bytes on the Message and")
     print("just ask about it. The calling code never builds a provider")
     print("payload, and get_model_capabilities() reports vision =", end=" ")
-    print(f"{vision.get_model_capabilities()['vision']}.\n")
+    print(f"{vision.get_model_capabilities().vision}.\n")
 
     first = "Describe this image in one short sentence."
     print(f"  you   > {first}")

@@ -1,8 +1,6 @@
 # demo_mcp_agent_tool_calling.py
 """
-================================================================================
-            MCP Agent Tool Calling Demo - SSE + stdio
-================================================================================
+MCP agent tool calling over SSE and stdio.
 
 This demo showcases agents automatically invoking MCP tools to complete tasks.
 It demonstrates the full agentic loop:
@@ -13,8 +11,8 @@ It demonstrates the full agentic loop:
 4. Agent receives tool observation
 5. Agent synthesizes final answer
 
-ARCHITECTURE:
-=============
+Architecture:
+
     +-----------------+
     |   User Query    |
     +--------+--------+
@@ -38,8 +36,8 @@ ARCHITECTURE:
     |  Final Answer   |
     +-----------------+
 
-PREREQUISITES:
-==============
+Prerequisites:
+
 1. pip install mcp
 2. Start Brave Search MCP server:
    docker run -d -p 8080:8080 -e BRAVE_API_KEY="YOUR_KEY" \\
@@ -55,6 +53,7 @@ from fairlib import (
     MCPServerConfig,
     SimpleAgent,
     SimpleReActPlanner,
+    ToolCallPostEvent,
     ToolExecutor,
     WorkingMemory,
 )
@@ -64,7 +63,17 @@ from fairlib.core.prompts import Example, PromptBuilder, RoleDefinition
 DEFAULT_BRAVE_SSE_URL = "http://localhost:8080/sse"
 
 
-def create_research_agent_prompt_builder():
+def _tool_named(registry, suffix: str):
+    """The registered name of the tool whose name ends with suffix, or None."""
+    if registry is None:
+        return None
+    for name in registry.get_all_tools():
+        if name.endswith(suffix):
+            return name
+    return None
+
+
+def create_research_agent_prompt_builder(brave_registry, fs_registry):
     """
     Create a prompt builder for a research agent.
 
@@ -72,44 +81,61 @@ def create_research_agent_prompt_builder():
     MCP tools look exactly the same as any other tool to the agent -
     the MCPToolAdapter handles converting simple strings to the
     JSON format that MCP servers expect.
+
+    Each example names a tool the agent really has: an example is added
+    only for a server that connected, so the model never sees (and never
+    imitates) a call to a tool that is not in its catalog.
     """
     builder = PromptBuilder()
 
     builder.role_definition = RoleDefinition(
         "You are a helpful research assistant that uses tools to find information. "
         "You MUST use the available tools to answer questions. "
-        "Always call a search tool when you need information from the web."
+        "When a question needs information from the web, call a search tool. "
+        "When you report what a tool returned, report it completely and exactly."
     )
 
     # Note: We do NOT add special format instructions here.
     # The SimpleReActPlanner will automatically merge its mandatory
     # format instructions, which use simple string tool_input.
 
-    builder.examples.append(
-        Example(
-            "# Example - Web Search:\n"
-            "user: What are the latest AI trends?\n"
-            "assistant: "
-            "Thought: I need to search the web to find the latest AI trends.\n"
-            "Action:\n"
-            "tool_name: brave_brave-search_brave_web_search\n"
-            "tool_input: latest AI trends 2025\n"
+    search_tool = _tool_named(brave_registry, "web_search")
+    if search_tool is not None:
+        builder.examples.append(
+            Example(
+                "# Example - Web Search:\n"
+                "user: What are the latest AI trends?\n"
+                "assistant: "
+                "Thought: I need to search the web to find the latest AI trends.\n"
+                "Action:\n"
+                f"tool_name: {search_tool}\n"
+                "tool_input: latest AI trends\n"
+            )
         )
-    )
 
-    builder.examples.append(
-        Example(
-            "# Example - Reading a file:\n"
-            "user: What's in the README file?\n"
-            "assistant: "
-            "Thought: I need to read the README file to see its contents.\n"
-            "Action:\n"
-            "tool_name: fs_filesystem_read_file\n"
-            "tool_input: README.md\n"
+    read_tool = _tool_named(fs_registry, "read_file")
+    if read_tool is not None:
+        builder.examples.append(
+            Example(
+                "# Example - Reading a file:\n"
+                "user: What's in the README file?\n"
+                "assistant: "
+                "Thought: I need to read the README file to see its contents.\n"
+                "Action:\n"
+                f"tool_name: {read_tool}\n"
+                "tool_input: README.md\n"
+            )
         )
-    )
 
     return builder
+
+
+def on_tool_call(event: ToolCallPostEvent) -> None:
+    """Print one MCP tool call: the tool, its input, and its result, whole."""
+    status = "ok" if event.succeeded else "failed"
+    print(
+        f"  [{event.tool_name}] {event.tool_input!r} -> {status}:\n{event.observation}"
+    )
 
 
 async def setup_mcp_connections():
@@ -176,18 +202,21 @@ async def setup_mcp_connections():
     return combined, brave_registry, fs_registry
 
 
-async def run_agent_demo(llm, registry, query: str):
+async def run_agent_demo(llm, registry, brave_registry, fs_registry, query: str):
     """Run the agent with a query and show the full agentic loop."""
     print("\n" + "-" * 60)
     print(f"QUERY: {query}")
     print("-" * 60)
 
     # Create agent with MCP-optimized prompting
-    prompt_builder = create_research_agent_prompt_builder()
+    prompt_builder = create_research_agent_prompt_builder(brave_registry, fs_registry)
     planner = SimpleReActPlanner(llm, registry, prompt_builder=prompt_builder)
     executor = ToolExecutor(registry)
     memory = WorkingMemory()
     agent = SimpleAgent(llm, planner, executor, memory, stateless=True, max_steps=5)
+    # Every MCP tool call is printed as it returns, so the answer can be
+    # checked against what the server actually sent back.
+    agent.events.subscribe(ToolCallPostEvent, on_tool_call)
 
     # Run the agent
     result = await agent.arun(query)
@@ -209,8 +238,8 @@ async def main():
     print("=" * 70)
 
     # Initialize LLM
-    print("\nLoading LLM (Dolphin-3B)...")
-    llm = HuggingFaceAdapter("dolphin3-qwen25-3b")
+    print("\nLoading LLM (Qwen2.5-7B)...")
+    llm = HuggingFaceAdapter("qwen25-7b")
 
     # Set up MCP connections
     combined_registry, brave_registry, fs_registry = await setup_mcp_connections()
@@ -230,18 +259,24 @@ async def main():
     for name in all_tools.keys():
         print(f"  - {name}")
 
-    # Demo queries
-    queries = [
-        "Search the web for what is the Model Context Protocol (MCP)",
-        "List the files in the current directory",
-    ]
-
-    # Only run queries for available tools
+    # Demo queries, one per server; a query runs only when its server connected.
     if brave_registry:
-        await run_agent_demo(llm, combined_registry, queries[0])
+        await run_agent_demo(
+            llm,
+            combined_registry,
+            brave_registry,
+            fs_registry,
+            "Search the web for what is the Model Context Protocol (MCP)",
+        )
 
     if fs_registry:
-        await run_agent_demo(llm, combined_registry, queries[1])
+        await run_agent_demo(
+            llm,
+            combined_registry,
+            brave_registry,
+            fs_registry,
+            "List the files in the mcp directory.",
+        )
 
     # Interactive mode
     print("\n" + "=" * 70)
@@ -255,8 +290,10 @@ async def main():
                 continue
             if user_input.lower() in ["exit", "quit", "q"]:
                 break
-            await run_agent_demo(llm, combined_registry, user_input)
-        except KeyboardInterrupt:
+            await run_agent_demo(
+                llm, combined_registry, brave_registry, fs_registry, user_input
+            )
+        except (KeyboardInterrupt, EOFError):
             print("\n\nExiting...")
             break
         except Exception as e:

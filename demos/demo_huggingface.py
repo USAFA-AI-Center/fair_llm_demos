@@ -17,6 +17,7 @@ see the v4 fallback behavior instead.
 import asyncio
 import os
 import sys
+from dataclasses import fields
 
 from fairlib import (
     DegradedResponse,
@@ -33,7 +34,7 @@ from fairlib import (
 )
 from fairlib.modules.mal.huggingface_adapter import TRANSFORMERS_V5
 
-MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "dolphin3-qwen25-3b")
+MODEL_NAME = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
 
 
 async def main():
@@ -101,8 +102,8 @@ async def main():
     # --- Step 5: get_model_capabilities() ---
     print("=== get_model_capabilities() ===")
     caps = llm.get_model_capabilities()
-    for key, val in caps.items():
-        print(f"  {key}: {val}")
+    for field in fields(caps):
+        print(f"  {field.name}: {getattr(caps, field.name)}")
     print()
 
     # --- Step 6: invoke() - synchronous generation ---
@@ -145,12 +146,12 @@ async def main():
 
     # --- Step 9: astream() - async streaming ---
     # On v5: uses AsyncTextIteratorStreamer for true non-blocking iteration.
-    # On v4: falls back to ainvoke() and yields a single Message.
+    # On v4: runs the checked generation off the loop and yields one Message.
     print("=== astream() - Async Streaming ===")
     if TRANSFORMERS_V5:
         print("  (v5: using AsyncTextIteratorStreamer)")
     else:
-        print("  (v4: falling back to ainvoke)")
+        print("  (v4: one complete Message from a generation run off the loop)")
     print("  Assistant: ", end="", flush=True)
     try:
         async for chunk in llm.astream(

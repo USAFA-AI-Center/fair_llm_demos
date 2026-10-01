@@ -30,6 +30,7 @@ Run:
 
 import asyncio
 import os
+import re
 import time
 
 from fairlib import (
@@ -38,6 +39,7 @@ from fairlib import (
     MultiActionReActPlanner,
     SimpleAgent,
     ToolExecutor,
+    ToolInvocationError,
     ToolRegistry,
     WorkingMemory,
 )
@@ -72,13 +74,32 @@ class _SlowLookupTool(AbstractTool):
         self.description = description
         self._table = table
 
+    def _lookup(self, text: str) -> str:
+        """Find the one known country the input names, tolerating extra words.
+
+        A model may send "France", "france.", or "the population of France";
+        each names France. Input that names no known country is a typed tool
+        failure listing the countries the table holds, so the model can correct
+        itself instead of reading a silent placeholder as an answer.
+        """
+        words = set(re.findall(r"[a-z]+", text.lower()))
+        named = [country for country in self._table if country in words]
+        if len(named) != 1:
+            known = ", ".join(country.title() for country in self._table)
+            raise ToolInvocationError(
+                f"{self.name} needs exactly one country name; got {text!r}. "
+                f"Known countries: {known}.",
+                tool_name=self.name,
+                kind=ToolInvocationError.Kind.VALIDATION,
+            )
+        return self._table[named[0]]
+
     async def acall(self, tool_input: StringInput) -> ToolOutput:
         _in_flight["now"] += 1
         _in_flight["max"] = max(_in_flight["max"], _in_flight["now"])
         try:
             await asyncio.sleep(0.5)
-            value = self._table.get(tool_input.input.strip().lower(), "unknown")
-            return TextResult(result=value)
+            return TextResult(result=self._lookup(tool_input.input))
         finally:
             _in_flight["now"] -= 1
 
@@ -123,12 +144,18 @@ async def show_scheduling_contract() -> None:
     registry = ToolRegistry()
     registry.register_tool(
         _SlowLookupTool(
-            "get_capital", "Return the capital city of a country.", _CAPITALS
+            "get_capital",
+            "Return the capital city of one country. Input: the country name, "
+            "for example Japan.",
+            _CAPITALS,
         )
     )
     registry.register_tool(
         _SlowLookupTool(
-            "get_population", "Return the population of a country.", _POPULATIONS
+            "get_population",
+            "Return the population of one country. Input: the country name, "
+            "for example Japan.",
+            _POPULATIONS,
         )
     )
     registry.register_tool(_ReportWriterTool(write_log))
@@ -161,28 +188,36 @@ def _on_schedule(event: ToolBatchScheduledEvent) -> None:
         )
 
 
+def _on_tool_call(event: ToolCallPostEvent) -> None:
+    print(
+        f"  [done] {event.tool_name}({event.tool_input!r}) -> {event.observation} "
+        f"(ok={event.succeeded})"
+    )
+
+
 async def main() -> None:
     registry = ToolRegistry()
     registry.register_tool(
         _SlowLookupTool(
-            "get_capital", "Return the capital city of a country.", _CAPITALS
+            "get_capital",
+            "Return the capital city of one country. Input: the country name, "
+            "for example Japan.",
+            _CAPITALS,
         )
     )
     registry.register_tool(
         _SlowLookupTool(
-            "get_population", "Return the population of a country.", _POPULATIONS
+            "get_population",
+            "Return the population of one country. Input: the country name, "
+            "for example Japan.",
+            _POPULATIONS,
         )
     )
 
     # One bus shared by the executor (which owns batch-path emission) and the agent.
     bus = AgentEventBus()
     bus.subscribe(ToolBatchScheduledEvent, _on_schedule)
-    bus.subscribe(
-        ToolCallPostEvent,
-        lambda e: print(
-            f"  [done] {e.tool_name} -> {e.observation} (ok={e.succeeded})"
-        ),
-    )
+    bus.subscribe(ToolCallPostEvent, _on_tool_call)
 
     print(
         f"Loading {MODEL_NAME} via the HuggingFaceAdapter (first run downloads weights)..."
