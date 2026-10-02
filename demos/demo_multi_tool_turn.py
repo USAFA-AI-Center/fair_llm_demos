@@ -10,6 +10,9 @@ two read-only lookups run in parallel), then the model synthesizes a single
 final answer in a follow-up turn that takes the ordinary one-call path.
 
 What it shows:
+  - The planner's tool catalog states each tool's declared effect and one
+    generated sentence saying which adjacent calls run at the same time; the
+    planner's own text states only how many actions a turn may hold.
   - MultiActionReActPlanner turns one completion into one OR several actions.
   - SimpleAgent runs a ToolCallBatch through aexecute_batch (parallel reads),
     and a single action through aexecute - the LLM chooses which, not the demo.
@@ -225,6 +228,9 @@ async def main() -> None:
     llm = HuggingFaceAdapter(MODEL_NAME, max_new_tokens=512)
     executor = ToolExecutor(registry, events=bus)
     planner = MultiActionReActPlanner(llm, registry)
+    catalog = planner.capture_prompt_configuration().tool_instructions
+    print("\nThe tool catalog the model reads (each entry states its declared effect):")
+    print(catalog)
     memory = WorkingMemory()
     agent = SimpleAgent(llm, planner, executor, memory, events=bus)
 

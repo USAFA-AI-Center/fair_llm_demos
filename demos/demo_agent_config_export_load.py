@@ -205,6 +205,7 @@ async def main():
     print(f"- Examples: {len(content['examples'])}")
     print(f"- Max steps: {config['agent']['max_steps']}")
     print(f"- Model: {config['model']['model_name']}")
+    print(f"- Document version: {config['version']}")
 
     again = save_agent_config(
         build_calculator_agent(llm, build_calculator_prompts()),
