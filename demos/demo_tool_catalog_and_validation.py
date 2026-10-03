@@ -15,6 +15,8 @@ things follow automatically, with no hand-written tool signatures to drift:
      the tool runs. A call that does not fit is rejected as a typed
      ToolInputValidationError, before any tool code executes, and the error
      carries the expected-input shape (schema_hint) so the failure is actionable.
+     A key the schema does not declare is refused at any depth, and the refusal
+     names its dotted path (location.zip).
   3. When that rejection happens inside the agent loop, the loop echoes the
      expected-input shape back into the observation, so the model self-corrects
      on the next step instead of retrying the same malformed call.
@@ -138,6 +140,21 @@ async def show_validation_rejection(registry: ToolRegistry) -> None:
     except ToolInputValidationError as exc:
         print(f"Rejected before the tool ran -> {type(exc).__name__}: {exc}")
         print("schema_hint carried on the error (what the loop echoes back):")
+        print(exc.schema_hint)
+    print()
+
+    # A key the schema does not declare is refused at every level, not only
+    # at the top: the nested Location has no 'zip', so the refusal names the
+    # dotted path to the key, and the hint ends with the example call.
+    extra_input = {
+        "title": "Sprint Review",
+        "location": {"city": "Denver", "country": "US", "zip": "80202"},
+    }
+    print(f"Calling schedule_event with an undeclared nested key: {extra_input}")
+    try:
+        await executor.aexecute("schedule_event", extra_input)
+    except ToolInputValidationError as exc:
+        print(f"Rejected before the tool ran -> {type(exc).__name__}: {exc}")
         print(exc.schema_hint)
     print()
 

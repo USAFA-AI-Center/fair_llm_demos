@@ -512,7 +512,7 @@ async def grade_single_essay(
         "clarity_style_checker": "Review the grammar, clarity and style of the essay.",
     }
     first_calls = [
-        {"tool_name": tool.name, "tool_input": first_subtasks[tool.name]}
+        {"tool_name": tool.name, "tool_input": {"subtask": first_subtasks[tool.name]}}
         for tool in worker_tools
         if tool.name in first_subtasks
     ]
@@ -541,7 +541,7 @@ async def grade_single_essay(
             '"overall_feedback": "...", "final_score": 72}\n'
             'Assistant: {"thought": "The grade is on file, so I finish.", '
             '"actions": [{"tool_name": "final_answer", "tool_input": '
-            '"Graded: final score 72."}]}'
+            '{"text": "Graded: final score 72."}}]}'
         )
     )
     manager_builder.examples.append(
@@ -555,8 +555,8 @@ async def grade_single_essay(
             "was produced ...\n"
             'Assistant: {"thought": "Grading failed twice, so there is no '
             'grade to report.", "actions": [{"tool_name": "final_answer", '
-            '"tool_input": "No grade was produced: the grading tool failed '
-            'twice."}]}'
+            '"tool_input": {"text": "No grade was produced: the grading '
+            'tool failed twice."}}]}'
         )
     )
 

@@ -550,10 +550,12 @@ async def grade_single_submission(
             "User: Grade the submission on file.\n"
             'Assistant: {"thought": "The two reviews are independent, so I '
             'delegate both in one turn.", "actions": ['
-            '{"tool_name": "static_analyzer", "tool_input": "Review the '
-            'style, comments and complexity of the submission."}, '
-            '{"tool_name": "logic_reviewer", "tool_input": "Review the '
-            'logic, edge cases and efficiency of the submission."}]}'
+            '{"tool_name": "static_analyzer", "tool_input": {"subtask": '
+            '"Review the style, comments and complexity of the '
+            'submission."}}, '
+            '{"tool_name": "logic_reviewer", "tool_input": {"subtask": '
+            '"Review the logic, edge cases and efficiency of the '
+            'submission."}}]}'
         )
     )
     manager_builder.examples.append(
@@ -569,7 +571,7 @@ async def grade_single_submission(
             '"overall_feedback": "...", "final_score": 72}\n'
             'Assistant: {"thought": "The grade is on file, so I finish.", '
             '"actions": [{"tool_name": "final_answer", "tool_input": '
-            '"Graded: final score 72."}]}'
+            '{"text": "Graded: final score 72."}}]}'
         )
     )
     manager_builder.examples.append(
@@ -583,8 +585,8 @@ async def grade_single_submission(
             "was produced ...\n"
             'Assistant: {"thought": "Grading failed twice, so there is no '
             'grade to report.", "actions": [{"tool_name": "final_answer", '
-            '"tool_input": "No grade was produced: the grading tool failed '
-            'twice."}]}'
+            '"tool_input": {"text": "No grade was produced: the grading '
+            'tool failed twice."}}]}'
         )
     )
 

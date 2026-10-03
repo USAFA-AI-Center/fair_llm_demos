@@ -20,6 +20,11 @@ second call (the adapters are built with capture_rendered_prompt=True): the
 observation sits in a user turn after the assistant turn, the continuation
 follows it in the same turn, and the only system turn is the first.
 
+Every call line also states whether the call carried the planner's action
+schema (ModelRequestEvent.response_schema_digest is set): each of the three
+models declares response_schema, so the planner constrains its reply to one
+JSON action object on every route, under each provider's own request field.
+
 Set FAIR_LLM_DEMO_MODEL for the Hugging Face model (default qwen25-7b),
 FAIR_LLM_DEMO_OLLAMA for the Ollama model (default qwen2.5:14b, served at
 localhost:11434) and FAIR_LLM_DEMO_GEMINI for the Gemini model (default
@@ -104,7 +109,10 @@ async def run_route(
     print(f"\n=== {name} ===")
     answer = await agent.arun(QUESTION)
     for index, request in enumerate(requests, start=1):
-        print(f"  call {index}: {', '.join(request.roles)}")
+        carried = request.response_schema_digest is not None
+        print(
+            f"  call {index}: {', '.join(request.roles)}  (schema carried: {carried})"
+        )
     for batch in batches:
         groups = "; ".join(
             f"{'parallel' if g.parallel else 'sequential'} {', '.join(g.tool_names)}"

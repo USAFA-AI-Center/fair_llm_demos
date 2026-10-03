@@ -17,25 +17,34 @@ tool_results before any call, after the plain calls, and after one request
 carrying a paired tool turn (sent or refused typed). Read the record for
 each decision; never cache it.
 
-Two local models take part: a vision model served by Ollama, and a text
-model loaded through Hugging Face transformers. For each, the demo prints
-the record, sends an image if vision is declared and shows the typed
-refusal if it is not, and passes a seed only when the model carries it,
-showing the refusal a model gives for an option it does not carry. The
-model's own replies carry the result.
+Three models take part: a vision model served by Ollama, a text model
+loaded through Hugging Face transformers, and a Google Gemini model. For
+each, the demo prints the record, sends an image if vision is declared and
+shows the typed refusal if it is not, passes a seed only when the model
+carries it, showing the refusal a model gives for an option it does not
+carry, and passes a response_schema only when the model declares it: the
+reply is then one JSON object of that schema. The model's own replies
+carry the result.
 
-Set FAIR_LLM_DEMO_VLM for the Ollama vision model and FAIR_LLM_DEMO_MODEL
-for the Hugging Face text model.
+Set FAIR_LLM_DEMO_VLM for the Ollama vision model, FAIR_LLM_DEMO_MODEL for
+the Hugging Face text model and FAIR_LLM_DEMO_GEMINI for the Gemini model.
+GEMINI_API_KEY must be set; without it the demo prints the adapter's typed
+refusal and exits non-zero. The Hugging Face model declares response_schema
+when the grammar extra is installed (pip install "fair-llm[grammar]").
 """
 
 import base64
+import json
 import os
+import sys
 from dataclasses import fields
 from typing import List, Tuple
 
 from fairlib import (
     AbstractChatModel,
     ConfigurationError,
+    FairlibError,
+    GeminiAdapter,
     HuggingFaceAdapter,
     Message,
     OllamaAdapter,
@@ -43,6 +52,20 @@ from fairlib import (
 
 VISION_MODEL = os.environ.get("FAIR_LLM_DEMO_VLM", "qwen3-vl-instruct-16k")
 TEXT_MODEL = os.environ.get("FAIR_LLM_DEMO_MODEL", "qwen25-7b")
+GEMINI_MODEL = os.environ.get("FAIR_LLM_DEMO_GEMINI", "gemini-3.6-flash")
+
+# A thinking model (Gemini) spends output tokens on its thoughts before it
+# writes the reply, so every call gets room for both; a local model stops at
+# its end of turn well before this budget.
+REPLY_BUDGET = 1024
+
+# A closed object schema: the reply must be exactly this object.
+COLOR_SCHEMA = {
+    "type": "object",
+    "properties": {"color": {"type": "string"}},
+    "required": ["color"],
+    "additionalProperties": False,
+}
 
 # A 96x96 JPEG: a red square with a blue circle, on white.
 SAMPLE_JPEG = base64.b64decode(
@@ -84,6 +107,10 @@ def build_models() -> List[Tuple[str, AbstractChatModel]]:
             "text model via transformers",
             HuggingFaceAdapter(model_name=TEXT_MODEL, max_new_tokens=60),
         ),
+        (
+            "hosted model via Gemini",
+            GeminiAdapter(model_name=GEMINI_MODEL, timeout=60),
+        ),
     ]
 
 
@@ -101,11 +128,11 @@ def ask_about_the_image(model: AbstractChatModel) -> None:
     question = "In one short sentence, what shapes and colors are in this image?"
     message = Message(role="user", content=question, images=(SAMPLE_JPEG,))
     if model.get_model_capabilities().vision:
-        reply = model.invoke([message], max_tokens=60)
+        reply = model.invoke([message], max_tokens=REPLY_BUDGET)
         print(f"  vision declared, so the image was sent: {reply.content.strip()}")
         return
     try:
-        model.invoke([message], max_tokens=60)
+        model.invoke([message], max_tokens=REPLY_BUDGET)
         print("  no vision declared, yet the image went through (unexpected)")
     except ConfigurationError as exc:
         print(f"  no vision declared, so the image is refused: {exc}")
@@ -115,16 +142,37 @@ def ask_with_a_seed(model: AbstractChatModel) -> None:
     prompt = "Name one primary color. Answer with the color only."
     message = Message(role="user", content=prompt)
     if "seed" in model.get_model_capabilities().generation_options:
-        reply = model.invoke([message], max_tokens=10, seed=7)
+        reply = model.invoke([message], max_tokens=REPLY_BUDGET, seed=7)
         print(f"  seed carried, reply: {reply.content.strip()}")
         return
     try:
-        model.invoke([message], max_tokens=10, seed=7)
+        model.invoke([message], max_tokens=REPLY_BUDGET, seed=7)
         print("  seed not declared, yet it was accepted (unexpected)")
     except ConfigurationError as exc:
         print(f"  seed not declared, so the call is refused: {exc}")
-    reply = model.invoke([message], max_tokens=10)
+    reply = model.invoke([message], max_tokens=REPLY_BUDGET)
     print(f"  without the seed, reply: {reply.content.strip()}")
+
+
+def ask_with_a_schema(model: AbstractChatModel) -> None:
+    prompt = "Name one primary color."
+    message = Message(role="user", content=prompt)
+    if "response_schema" in model.get_model_capabilities().generation_options:
+        reply = model.invoke(
+            [message], max_tokens=REPLY_BUDGET, response_schema=COLOR_SCHEMA
+        )
+        text = reply.content.strip()
+        print(f"  response_schema declared, so the schema was sent; reply: {text}")
+        try:
+            print(f"  the reply reads as one JSON object: {json.loads(text)}")
+        except json.JSONDecodeError:
+            print("  the reply is not one JSON object")
+        return
+    try:
+        model.invoke([message], max_tokens=REPLY_BUDGET, response_schema=COLOR_SCHEMA)
+        print("  response_schema not declared, yet it was accepted (unexpected)")
+    except ConfigurationError as exc:
+        print(f"  response_schema not declared, so the call is refused: {exc}")
 
 
 def send_a_tool_turn(model: AbstractChatModel) -> None:
@@ -140,19 +188,25 @@ def send_a_tool_turn(model: AbstractChatModel) -> None:
         Message(role="user", content="State the result in one short sentence."),
     ]
     try:
-        reply = model.invoke(history, max_tokens=30)
+        reply = model.invoke(history, max_tokens=REPLY_BUDGET)
         print(f"  the paired tool turn was carried: {reply.content.strip()}")
     except ConfigurationError as exc:
         print(f"  the paired tool turn is refused: {exc}")
 
 
-def main() -> None:
+def main() -> int:
+    try:
+        models = build_models()
+    except FairlibError as exc:
+        print(f"A model could not be built: {type(exc).__name__}: {exc}")
+        return 1
     print("One record per model; the loop never asks which provider it holds.\n")
-    for label, model in build_models():
+    for label, model in models:
         show_record(label, model)
         before = model.get_model_capabilities().tool_results
         ask_about_the_image(model)
         ask_with_a_seed(model)
+        ask_with_a_schema(model)
         plain = model.get_model_capabilities().tool_results
         send_a_tool_turn(model)
         after = model.get_model_capabilities().tool_results
@@ -161,7 +215,8 @@ def main() -> None:
             f"{plain}; after the tool-turn request: {after}"
         )
         print()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

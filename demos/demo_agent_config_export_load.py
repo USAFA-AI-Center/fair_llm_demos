@@ -45,12 +45,14 @@ from fairlib import (
     Example,
     FormatInstruction,
     HuggingFaceAdapter,
+    MaxStepsExceeded,
     PromptBuilder,
     ReActPlanner,
     RoleDefinition,
     SafeCalculatorTool,
     SimpleAgent,
     ToolCallPostEvent,
+    ToolCallPreEvent,
     ToolExecutor,
     ToolRegistry,
     WeatherTool,
@@ -434,6 +436,8 @@ async def demonstrate_multi_agent_round_trip(llm):
         print(f"Delegation query response: {response}")
     except PlannerParseError as e:
         print(f"Delegation query (typed parse failure): {e}")
+    except MaxStepsExceeded as e:
+        print(f"Delegation query (typed step limit reached): {e}")
     ticker.report()
 
 
@@ -506,10 +510,23 @@ async def demonstrate_live_registry_swap(agent: SimpleAgent):
     catalog_after = agent.planner.render_system_prompt()
     print(f"'weather' in catalog after swap:  {'weather' in catalog_after}")
 
+    # The assigned executor is bound to the agent's bus at assignment, as
+    # one passed at construction is, so its tool-call events reach the
+    # agent's subscribers.
+    def on_call(event: ToolCallPreEvent) -> None:
+        print(
+            f"  [ToolCallPreEvent on the agent bus] {event.tool_name} {event.tool_input!r}"
+        )
+
+    agent.events.subscribe(ToolCallPreEvent, on_call)
+
     agent.memory.clear()
     print("\nQuery: What is the weather in Denver?")
-    response = await agent.arun("What is the weather in Denver?")
-    print(f"Response: {response}")
+    try:
+        response = await agent.arun("What is the weather in Denver?")
+        print(f"Response: {response}")
+    except MaxStepsExceeded as e:
+        print(f"Response (typed step limit reached): {e}")
 
 
 if __name__ == "__main__":
