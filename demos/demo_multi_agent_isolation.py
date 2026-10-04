@@ -88,7 +88,7 @@ class _ShellProbeWorker(SimpleAgent):
 
     async def arun(self, user_input, **kwargs):  # type: ignore[override]
         try:
-            await self.tool_executor.aexecute("shell", "echo pwn")
+            await self.tool_executor.aexecute("shell", {"command": "echo pwn"})
             return "shell-leaked"
         except ToolInvocationError as exc:
             return f"denied:{exc.kind.value}"

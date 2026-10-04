@@ -22,8 +22,9 @@ prints:
 
 It then runs the agent to its answer. A contrast run builds the same
 planner with constrained_decoding=False: the call carries no schema and
-the model writes the taught key-value text shape, which the planner reads
-and the executor validates the same way.
+the model writes the taught key-value text shape, whose tool_input the
+planner reads strictly as one JSON object (anything else is refused and
+retried) and the executor validates the same way.
 
 Requirements: an Ollama server at localhost:11434 serving FAIR_LLM_DEMO_OLLAMA
 (default qwen2.5:14b), and a Hugging Face model FAIR_LLM_DEMO_MODEL (default

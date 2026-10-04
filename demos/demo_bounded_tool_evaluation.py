@@ -13,10 +13,8 @@ as a typed ResourceExhaustedError whose observation names the bound and says
 the same call reaches it again, and the model reacts, with a different action
 or a final answer that says the computation did not finish. Each run's
 BoundedRunEvent and each dispatch's ToolCallPostEvent (with the tool_input
-the model sent) print in one stream from the agent's bus, along with any
-ToolInputRepairedEvent the planner raises when it reads the model's input
-into the tool's field, so the outcome is read from typed events, not
-inferred.
+the model sent) print in one stream from the agent's bus, so the outcome is
+read from typed events, not inferred.
 
 BOUNDED is a resource bound, not isolation: the child runs as the same user
 with the same reach, so it is for fairlib's own compute, never model-written
@@ -50,7 +48,6 @@ from fairlib import (
     SimpleReActPlanner,
     ToolCallPostEvent,
     ToolExecutor,
-    ToolInputRepairedEvent,
     ToolInvocationError,
     ToolRegistry,
     WorkingMemory,
@@ -121,13 +118,6 @@ def on_tool_call_post(event: ToolCallPostEvent) -> None:
     )
 
 
-def on_input_read(event: ToolInputRepairedEvent) -> None:
-    print(
-        f"[ToolInputRepairedEvent] tool_name={event.tool_name} "
-        f"original={event.original_text!r} read_as={event.repaired_text}"
-    )
-
-
 def on_loop_guard(event: LoopGuardTrippedEvent) -> None:
     print(
         f"[LoopGuardTrippedEvent] guard={event.guard_type.value} "
@@ -171,7 +161,6 @@ async def main() -> None:
     )
     agent.events.subscribe(BoundedRunEvent, on_bounded_run)
     agent.events.subscribe(ToolCallPostEvent, on_tool_call_post)
-    agent.events.subscribe(ToolInputRepairedEvent, on_input_read)
     agent.events.subscribe(LoopGuardTrippedEvent, on_loop_guard)
 
     for number, question in enumerate(QUESTIONS, start=1):

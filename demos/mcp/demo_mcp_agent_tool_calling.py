@@ -97,7 +97,7 @@ def create_research_agent_prompt_builder(brave_registry, fs_registry):
 
     # Note: We do NOT add special format instructions here.
     # The SimpleReActPlanner will automatically merge its mandatory
-    # format instructions, which use simple string tool_input.
+    # format instructions: tool_input is one JSON object of the tool's fields.
 
     search_tool = _tool_named(brave_registry, "web_search")
     if search_tool is not None:
@@ -109,7 +109,7 @@ def create_research_agent_prompt_builder(brave_registry, fs_registry):
                 "Thought: I need to search the web to find the latest AI trends.\n"
                 "Action:\n"
                 f"tool_name: {search_tool}\n"
-                "tool_input: latest AI trends\n"
+                'tool_input: {"query": "latest AI trends"}\n'
             )
         )
 
@@ -123,7 +123,7 @@ def create_research_agent_prompt_builder(brave_registry, fs_registry):
                 "Thought: I need to read the README file to see its contents.\n"
                 "Action:\n"
                 f"tool_name: {read_tool}\n"
-                "tool_input: README.md\n"
+                'tool_input: {"path": "README.md"}\n'
             )
         )
 

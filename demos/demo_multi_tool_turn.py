@@ -165,10 +165,10 @@ async def show_scheduling_contract() -> None:
 
     executor = ToolExecutor(registry)
     calls = [
-        Action("get_capital", "France"),
-        Action("get_population", "Japan"),
-        Action("save_report", "capitals-and-populations"),
-        Action("get_capital", "Brazil"),
+        Action("get_capital", {"input": "France"}),
+        Action("get_population", {"input": "Japan"}),
+        Action("save_report", {"input": "capitals-and-populations"}),
+        Action("get_capital", {"input": "Brazil"}),
     ]
     results = await executor.aexecute_batch(calls)
 

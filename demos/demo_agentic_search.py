@@ -21,8 +21,7 @@ repeatable.
 
 The demo subscribes to the agent's event bus and prints every tool call as it
 happens: the tool, the input it received, and the first line of what it
-returned. When the planner reads a tool_input the model wrote as field=value
-text into the tool's fields, the ToolInputRepairedEvent is printed too.
+returned.
 """
 
 import asyncio
@@ -42,7 +41,6 @@ from fairlib import (
     SimpleAgent,
     ToolCallPostEvent,
     ToolExecutor,
-    ToolInputRepairedEvent,
     ToolRegistry,
     WorkingMemory,
 )
@@ -98,14 +96,6 @@ def on_tool_call(event: ToolCallPostEvent) -> None:
     status = "ok" if event.succeeded else "failed"
     print(
         f"  [{event.tool_name}] {event.tool_input!r} -> {status}:\n{event.observation}"
-    )
-
-
-def on_input_read(event: ToolInputRepairedEvent) -> None:
-    """Print a tool_input the planner read from field=value text."""
-    print(
-        f"  [input read] {event.tool_name}: {event.original_text!r} -> "
-        f"{event.repaired_text}"
     )
 
 
@@ -181,7 +171,6 @@ async def main():
         # executor serves one bus, so the ticker subscribes once.
         bus = AgentEventBus()
         bus.subscribe(ToolCallPostEvent, on_tool_call)
-        bus.subscribe(ToolInputRepairedEvent, on_input_read)
 
         for index, question in enumerate(QUESTIONS, start=1):
             print("=" * 60)

@@ -56,14 +56,16 @@ atexit.register(shutil.rmtree, SCRATCH_DIR, ignore_errors=True)
 ADD_EXAMPLE = (
     "User: What is 15 plus 27?\n"
     '{"thought": "I need to add 15 and 27 with the calculator.", '
-    '"action": {"tool_name": "safe_calculator", "tool_input": "15 + 27"}}\n'
+    '"action": {"tool_name": "safe_calculator", '
+    '"tool_input": {"expression": "15 + 27"}}}\n'
     "Observation: 42\n"
     '{"thought": "The calculator returned 42, so I can answer.", '
-    '"action": {"tool_name": "final_answer", "tool_input": "15 plus 27 is 42."}}'
+    '"action": {"tool_name": "final_answer", '
+    '"tool_input": {"text": "15 plus 27 is 42."}}}'
 )
 
-# The same idea in SimpleReActPlanner's key-value shape: fine for that
-# planner, wrong for this one.
+# The same idea in SimpleReActPlanner's key-value shape, its input as bare
+# text: a shape this planner's parser refuses.
 WRONG_FORMAT_EXAMPLE = (
     "User: What is 2 plus 2?\n"
     "Thought: I should add them.\n"

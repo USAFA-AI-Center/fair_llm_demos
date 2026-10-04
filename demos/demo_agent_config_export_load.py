@@ -105,10 +105,11 @@ def build_calculator_prompts() -> PromptBuilder:
         Example(
             "User: What is 15 plus 27?\n"
             '{"thought": "I need to add 15 and 27 with the calculator.", '
-            '"action": {"tool_name": "safe_calculator", "tool_input": "15 + 27"}}\n'
+            '"action": {"tool_name": "safe_calculator", '
+            '"tool_input": {"expression": "15 + 27"}}}\n'
             "Observation: 42\n"
             '{"thought": "The calculator returned 42, so I can answer.", '
-            '"action": {"tool_name": "final_answer", "tool_input": "42"}}'
+            '"action": {"tool_name": "final_answer", "tool_input": {"text": "42"}}}'
         )
     )
 
@@ -116,10 +117,11 @@ def build_calculator_prompts() -> PromptBuilder:
         Example(
             "User: Calculate 8 times 9\n"
             '{"thought": "I need to multiply 8 by 9.", '
-            '"action": {"tool_name": "safe_calculator", "tool_input": "8 * 9"}}\n'
+            '"action": {"tool_name": "safe_calculator", '
+            '"tool_input": {"expression": "8 * 9"}}}\n'
             "Observation: 72\n"
             '{"thought": "The result is 72, so I can answer.", '
-            '"action": {"tool_name": "final_answer", "tool_input": "72"}}'
+            '"action": {"tool_name": "final_answer", "tool_input": {"text": "72"}}}'
         )
     )
 

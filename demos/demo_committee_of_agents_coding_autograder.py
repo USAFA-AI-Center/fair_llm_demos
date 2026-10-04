@@ -169,12 +169,10 @@ from fairlib.utils.document_processor import DocumentProcessor
 
 
 def _delegation_text(tool_input: object) -> str:
-    """A delegation's input as the model wrote it: the subtask alone, or JSON."""
+    """A delegation's input as the model wrote it: the subtask alone, or its JSON object."""
     if isinstance(tool_input, dict) and set(tool_input) == {"subtask"}:
         return str(tool_input["subtask"])
-    if isinstance(tool_input, (dict, list)):
-        return json.dumps(tool_input)
-    return str(tool_input)
+    return json.dumps(tool_input, default=str)
 
 
 logger = logging.getLogger(__name__)
