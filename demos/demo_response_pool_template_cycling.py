@@ -13,8 +13,10 @@ for two redirects in a row: each tool call is printed with the redirect the
 pool rendered, so you can watch the template advance from one call to the
 next and carry on from where Part A left off. A LoopGuardTrippedEvent
 subscriber prints a line if the agent ever repeats the same call, so one
-call per question is visible, not assumed. The demo also shows state and
-load_state so the cursor survives a restart.
+call per question is visible, not assumed, and a run that stops without a
+final answer prints its typed error (MaxStepsExceeded or
+LoopGuardStoppedError) rather than a traceback. The demo also shows state
+and load_state so the cursor survives a restart.
 
 Run: PYTHONPATH=. python demos/demo_response_pool_template_cycling.py
 Requires a GPU for Part B. Set FAIR_LLM_DEMO_MODEL to override the default model.
@@ -27,7 +29,9 @@ from pydantic import BaseModel, Field
 
 from fairlib import (
     HuggingFaceAdapter,
+    LoopGuardStoppedError,
     LoopGuardTrippedEvent,
+    MaxStepsExceeded,
     ResponsePool,
     RoleDefinition,
     SimpleAgent,
@@ -120,12 +124,17 @@ async def demo_pool_in_agent(pool: ResponsePool) -> None:
     registry.register_tool(TutorRedirectTool(pool))
     executor = ToolExecutor(registry)
     planner = SimpleReActPlanner(llm, registry)
+    # The role names the two steps of a request (call the tool once, then
+    # answer with its result word for word), so the model answers after one
+    # tool call.
     planner.prompt_builder.role_definition = RoleDefinition(
-        "You help a math teacher phrase redirects for stuck students. For each "
-        "request, call tutor_redirect once with a short hint topic of a few words "
-        "(the next small step the student should try). Your final answer is "
-        "the redirect sentence from the tool's result, copied word for word. "
-        "Never solve the student's problem."
+        "You relay tutor redirects for a math teacher. For each request, take "
+        "exactly two steps. Step 1: call tutor_redirect once with a short hint "
+        "topic of a few words (the next small step the student should try). "
+        "Step 2: give your final answer, whose text is the tool's result copied "
+        "word for word. The tool's result is always the finished redirect, so "
+        "never call the tool a second time for the same request, and never "
+        "solve the student's problem."
     )
     agent = SimpleAgent(
         llm=llm,
@@ -147,7 +156,13 @@ async def demo_pool_in_agent(pool: ResponsePool) -> None:
     for prompt in prompts:
         print(f"\nUser: {prompt}")
         print(f"  (next template: {pool.peek()!r})")
-        answer = await agent.arun(prompt)
+        try:
+            answer = await agent.arun(prompt)
+        except (MaxStepsExceeded, LoopGuardStoppedError) as exc:
+            # A run that never reaches a final answer ends with a typed error;
+            # the redirects the pool rendered before it are printed above.
+            print(f"Agent stopped: {type(exc).__name__}: {exc}")
+            continue
         print("Agent:", answer)
 
 

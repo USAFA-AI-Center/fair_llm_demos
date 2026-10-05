@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from fairlib import (
+    AbstractTraceEventRecord,
     HuggingFaceAdapter,
     RoleDefinition,
     SafeCalculatorTool,
@@ -108,32 +109,33 @@ async def main() -> None:
         trace_metadata={"demo": "structured-trace-export"},
     )
 
-    # to_dict is the trace contract every AbstractAgentRunTrace honours, so
-    # the demo reads the trace through it rather than through one class.
-    data = trace.to_dict()
+    # Every AbstractAgentRunTrace declares its read members, so the demo
+    # reads the trace through them rather than through one class.
     print("\n--- Trace summary ---")
-    print("Final output:", data["output"])
-    print("Run status:", data["status"])
-    print(f"Recorded {len(data['events'])} events, in order:")
-    for record in data["events"]:
-        print(f"  #{record['sequence']:<3} {record['event_type']}")
+    print("Run id:", trace.run_id)
+    print("Final output:", trace.output)
+    print("Run status:", trace.status)
+    print(f"Recorded {len(trace.events)} events, in order:")
+    for record in trace.events:
+        print(f"  #{record.sequence:<3} {record.event_type}")
 
-    def show(record: dict[str, Any], indent: str) -> None:
-        detail = describe(record["event_type"], record["payload"])
-        print(f"{indent}#{record['sequence']:<3} {record['event_type']:<20} {detail}")
+    def show(record: AbstractTraceEventRecord, indent: str) -> None:
+        detail = describe(record.event_type, record.payload)
+        print(f"{indent}#{record.sequence:<3} {record.event_type:<20} {detail}")
 
     print("\nGrouped steps (causal inspection):")
-    placed = len(data["before_first_step"])
-    if data["before_first_step"]:
+    placed = len(trace.before_first_step)
+    if trace.before_first_step:
         print("  Before the first step:")
-        for record in data["before_first_step"]:
+        for record in trace.before_first_step:
             show(record, "    ")
-    for step in data["steps"]:
-        print(f"  Step {step['step']}:")
-        for record in step["events"]:
+    print(f"{len(trace.steps)} steps:")
+    for step in trace.steps:
+        print(f"  Step {step.step}:")
+        for record in step.events:
             placed += 1
             show(record, "    ")
-    print(f"{placed} of {len(data['events'])} recorded events placed in the view.")
+    print(f"{placed} of {len(trace.events)} recorded events placed in the view.")
 
     with tempfile.TemporaryDirectory() as tmp:
         saved = trace.save(Path(tmp) / "run_trace.json")

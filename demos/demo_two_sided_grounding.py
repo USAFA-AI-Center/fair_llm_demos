@@ -8,6 +8,10 @@ the tool actually retrieved and reports a fabrication rate.
 
 The whole path runs through a SimpleAgent so the retrieval, the citation
 instruction, and the answer are the agent's own, not a hand-built prompt.
+The agent answers two questions, one run each. The numbering is run-scoped:
+the agent starts its tools at the start of every run, so each run's sources
+begin at [S1], and each answer is verified against the sources of its own
+run, read right after that run.
 
 Requires a local model; defaults to HuggingFaceAdapter("qwen25-7b").
 Set FAIR_LLM_DEMO_MODEL to override. The first run may download weights.
@@ -99,30 +103,39 @@ async def main() -> None:
         "'search_knowledge_base' tool before answering, and your final answer "
         "must cite the passages it returns using only their [S#] markers."
     )
+    # The questions are unrelated, so the agent is stateless: each run starts
+    # from an empty memory, and no earlier run's [S1] can be cited by mistake.
     agent = SimpleAgent(
         llm=llm,
         planner=planner,
         tool_executor=ToolExecutor(tool_registry),
         memory=WorkingMemory(),
         max_steps=6,
+        stateless=True,
     )
 
-    question = "What are the core principles of FAIR-LLM?"
-    print(f"\nYou: {question}")
-    rag_tool.reset_grounding()
-    answer = await agent.arun(question)
-    print(f"\nAgent: {answer}")
+    questions = [
+        "What are the core principles of FAIR-LLM?",
+        "What does the Model Abstraction Layer let callers do?",
+    ]
+    for question in questions:
+        print(f"\nYou: {question}")
+        answer = await agent.arun(question)
+        print(f"\nAgent: {answer}")
 
-    # The tool remembers which sources it handed the model this session, so
-    # the verifier checks the answer against exactly those.
-    context = rag_tool.grounded_context
-    if context is None:
-        print("\nThe agent answered without calling the tool; nothing to verify.")
-        return
-    print("\nSources the tool retrieved:")
-    for source in context.sources:
-        print(f"  {source.marker} {source.content}")
-    _print_report("Citation verification", CitationVerifier().verify(answer, context))
+        # The tool keeps the sources it handed the model during this run,
+        # readable until the next run starts, so the verifier checks the
+        # answer against exactly those.
+        context = rag_tool.grounded_context
+        if context is None:
+            print("\nThe agent answered without calling the tool; nothing to verify.")
+            continue
+        print("\nSources the tool retrieved in this run:")
+        for source in context.sources:
+            print(f"  {source.marker} {source.content}")
+        _print_report(
+            "Citation verification", CitationVerifier().verify(answer, context)
+        )
 
 
 if __name__ == "__main__":

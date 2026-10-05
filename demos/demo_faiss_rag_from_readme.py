@@ -6,7 +6,9 @@ This mirrors demo_rag_from_documents.py, but chunks README.md with
 DocumentProcessor, stores and retrieves the chunks with FaissVectorStore,
 re-ranks every retrieval with a CrossEncoder, and runs the full ReAct agent
 loop over the re-ranked search tool. Each knowledge-base search the agent
-makes is printed with its query and the [S#] markers it returned.
+makes is printed with its query and the [S#] markers it returned. Before the
+store directory is removed, its listing is printed: index.faiss and
+mapping.json, the store's only files.
 """
 
 import asyncio
@@ -182,6 +184,13 @@ async def main():
         except Exception as e:
             logger.error(f"Agent error for question '{q}': {e}", exc_info=True)
             print("Agent: I encountered an error and couldn't process your request.")
+
+    # add_documents persisted the store: the directory holds the FAISS index
+    # and its JSON mapping (the texts and metadata), and no pickle.
+    print(f"\nPersisted FAISS store {index_dir}:")
+    for entry in sorted(index_dir.iterdir()):
+        print(f"  {entry.name} ({entry.stat().st_size} bytes)")
+    print(f"  mapping.pkl present: {(index_dir / 'mapping.pkl').exists()}")
 
     # remove created faiss directory
     try:
